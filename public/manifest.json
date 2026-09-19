@@ -1,0 +1,17 @@
+{
+  "short_name": "LakayaTOURNAMENT",
+  "name": "LakayaTOURNAMENT — Play • Compete • Win",
+  "icons": [
+    {
+      "src": "/logo.jpg",
+      "type": "image/jpeg",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#070b14",
+  "theme_color": "#0047AB",
+  "display": "standalone",
+  "orientation": "any",
+  "description": "The Premier Haitian Competitive Gaming & Esports Tournament Platform. EA SPORTS FC 27, Mortal Kombat, and more with MonCash Payouts."
+}

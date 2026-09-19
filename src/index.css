@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+}
+
+.font-display {
+  font-family: 'Orbitron', sans-serif;
+}
+
+.font-tech {
+  font-family: 'Rajdhani', sans-serif;
+}
+
+/* Haitian Esports Glow Utilities */
+.glow-haiti-blue {
+  box-shadow: 0 0 25px rgba(0, 71, 171, 0.45);
+}
+
+.glow-haiti-red {
+  box-shadow: 0 0 25px rgba(210, 16, 52, 0.45);
+}
+
+.glow-gold {
+  box-shadow: 0 0 25px rgba(255, 199, 44, 0.35);
+}
+
+.text-glow-blue {
+  text-shadow: 0 0 12px rgba(56, 189, 248, 0.6);
+}
+
+.text-glow-red {
+  text-shadow: 0 0 12px rgba(244, 63, 94, 0.6);
+}
+
+.text-glow-gold {
+  text-shadow: 0 0 12px rgba(250, 204, 21, 0.6);
+}
+
+/* Certificate Print Styles */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #certificate-print-area, #certificate-print-area * {
+    visibility: visible;
+  }
+  #certificate-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 20px;
+    background: white !important;
+    color: black !important;
+  }
+}

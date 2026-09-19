@@ -1,0 +1,6 @@
+{
+  "name": "LakayaTOURNAMENT",
+  "description": "Professional Haitian gaming and esports tournament platform. PLAY • COMPETE • WIN",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
