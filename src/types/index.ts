@@ -1,4 +1,14 @@
-export type UserRole = 'gamer' | 'admin';
+export type UserRole = 'gamer' | 'admin' | 'owner';
+
+export type UserStatus = 'active' | 'suspended';
+
+export interface AdminPermissions {
+  can_manage_tournaments?: boolean;
+  can_verify_matches?: boolean;
+  can_process_payouts?: boolean;
+  can_create_discounts?: boolean;
+  can_manage_gamers?: boolean;
+}
 
 export type MembershipStatus = 'active' | 'pending' | 'expired' | 'cancelled' | 'suspended';
 export type MembershipPlan = 'monthly' | 'yearly';
@@ -42,6 +52,8 @@ export interface User {
   created_at: string;
   display_name?: string;
   bio?: string;
+  status?: UserStatus;
+  admin_permissions?: AdminPermissions;
   // Computed / Joined fields
   is_member_active?: boolean;
   membership_plan?: MembershipPlan;
@@ -100,12 +112,15 @@ export interface DiscountCode {
   id: string;
   code: string;
   discount_amount: number;
+  discount_type?: 'fixed' | 'percentage';
   membership_plan: 'all' | 'monthly' | 'yearly';
   max_uses: number;
   current_uses: number;
   is_one_time: boolean;
   specific_gamer_id?: string;
+  specific_username?: string;
   status: 'active' | 'used' | 'expired' | 'disabled';
+  created_by?: string;
   starts_at: string;
   expires_at: string;
   created_at: string;
@@ -375,8 +390,40 @@ export interface HeadToHeadStats {
 export interface AuditLog {
   id: string;
   user_id?: string;
+  actor_id?: string;
+  actor_role?: string;
   action: string;
+  target_resource?: string;
+  target_id?: string;
+  result?: 'ALLOWED' | 'DENIED' | 'SUCCESS' | 'FAILED';
   details: string;
   ip_address?: string;
   created_at: string;
 }
+
+export interface OwnerStats {
+  total_gamers: number;
+  total_admins: number;
+  active_members: number;
+  expired_members: number;
+  active_tournaments: number;
+  total_tournament_revenue: number;
+  membership_revenue: number;
+  match_revenue: number;
+  match_fees_10_percent: number;
+  total_rewards: number;
+  wallet_liability: number;
+  pending_withdrawals: number;
+  completed_payouts: number;
+  pending_payments: number;
+  failed_payments: number;
+  certificates_count: number;
+  membership_credits_count: number;
+  security_alerts: Array<{
+    id: string;
+    level: 'warning' | 'critical' | 'info';
+    message: string;
+    timestamp: string;
+  }>;
+}
+

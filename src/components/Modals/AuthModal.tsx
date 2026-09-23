@@ -50,19 +50,15 @@ export const AuthModal: React.FC = () => {
     }
   };
 
-  const handleQuickLogin = async (asAdmin: boolean) => {
+  const handleQuickLogin = (asOwner: boolean) => {
     setError(null);
-    setLoading(true);
-    try {
-      if (asAdmin) {
-        await login({ email_or_username: 'spideedtheking@gmail.com', password: 'Password123!' });
-      } else {
-        await login({ email_or_username: 'jeanluc@gmail.com', password: 'Gamer123!' });
-      }
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+    setAuthModalMode('login');
+    if (asOwner) {
+      setEmailOrUsername('spideedtheking@gmail.com');
+      setPassword('');
+    } else {
+      setEmailOrUsername('jeanluc@gmail.com');
+      setPassword('Gamer123!');
     }
   };
 

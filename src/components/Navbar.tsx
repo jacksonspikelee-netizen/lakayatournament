@@ -72,8 +72,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
     { id: 'profile', label: 'Profile', icon: UserIcon },
   ];
 
-  if (user?.role === 'admin' || user?.email === 'spideedtheking@gmail.com') {
-    navItems.push({ id: 'admin', label: 'Admin', icon: Crown });
+  if (user?.role === 'owner' || user?.role === 'admin' || user?.email === 'spideedtheking@gmail.com') {
+    navItems.push({ 
+      id: 'admin', 
+      label: user?.role === 'owner' ? 'Owner Control' : 'Admin', 
+      icon: user?.role === 'owner' ? Crown : ShieldCheck 
+    });
   }
 
   const languages: { code: Language; label: string; flag: string }[] = [
@@ -257,8 +261,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
                   <span>${user.wallet_balance?.toFixed(2) || '0.00'}</span>
                 </button>
 
-                {/* Membership Status Badge */}
-                {user.is_member_active ? (
+                {/* Role / Membership Status Badge */}
+                {user.role === 'owner' ? (
+                  <span className="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/50 rounded-xl text-amber-300 text-[11px] font-black tracking-wider uppercase shadow-md shadow-amber-950/40">
+                    <Crown className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                    <span>OWNER</span>
+                  </span>
+                ) : user.role === 'admin' ? (
+                  <span className="hidden sm:inline-flex items-center space-x-1 px-2.5 py-1 bg-blue-500/20 border border-blue-500/50 rounded-xl text-blue-300 text-[11px] font-bold tracking-wider uppercase">
+                    <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                    <span>ADMIN</span>
+                  </span>
+                ) : user.is_member_active ? (
                   <button
                     onClick={() => setCurrentTab('membership')}
                     className="hidden md:flex items-center space-x-1 px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-[11px] font-bold"

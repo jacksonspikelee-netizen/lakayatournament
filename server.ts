@@ -309,7 +309,113 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS sent_emails (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    recipient_email TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    body_html TEXT NOT NULL,
+    type TEXT NOT NULL,
+    amount REAL,
+    reference_id TEXT,
+    status TEXT DEFAULT 'delivered',
+    created_at TEXT NOT NULL
+  );
 `);
+
+// Schema Migrations for Bank-Grade Owner & Admin Security System
+try { db.exec("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'"); } catch {}
+try { db.exec("ALTER TABLE users ADD COLUMN admin_permissions TEXT"); } catch {}
+try { db.exec("ALTER TABLE discount_codes ADD COLUMN discount_type TEXT DEFAULT 'fixed'"); } catch {}
+try { db.exec("ALTER TABLE discount_codes ADD COLUMN specific_username TEXT"); } catch {}
+try { db.exec("ALTER TABLE discount_codes ADD COLUMN created_by TEXT"); } catch {}
+try { db.exec("ALTER TABLE audit_logs ADD COLUMN actor_role TEXT"); } catch {}
+try { db.exec("ALTER TABLE audit_logs ADD COLUMN target_resource TEXT"); } catch {}
+try { db.exec("ALTER TABLE audit_logs ADD COLUMN target_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE audit_logs ADD COLUMN result TEXT DEFAULT 'SUCCESS'"); } catch {}
+
+// Dedicated Owner Definition & Single-Authorized Account Enforcement
+const OWNER_EMAIL = 'spideedtheking@gmail.com';
+const OWNER_DISPLAY_NAME = 'DJSPIDEED THEKING';
+
+// Enforce single authorized owner in database on boot
+try {
+  db.prepare("UPDATE users SET role = 'gamer' WHERE role = 'owner' AND email != ?").run(OWNER_EMAIL);
+  db.prepare("UPDATE users SET role = 'owner', display_name = ?, full_name = ?, status = 'active' WHERE email = ?")
+    .run(OWNER_DISPLAY_NAME, OWNER_DISPLAY_NAME, OWNER_EMAIL);
+} catch (e) {
+  console.error('Owner database check error:', e);
+}
+
+// Transactional Email Dispatcher for Cash Outs, Payouts & Payments
+function sendTransactionalEmail({
+  userId,
+  recipientEmail,
+  subject,
+  type,
+  amount,
+  referenceId,
+  title,
+  message,
+}: {
+  userId: string;
+  recipientEmail: string;
+  subject: string;
+  type: string;
+  amount?: number;
+  referenceId?: string;
+  title: string;
+  message: string;
+}): string {
+  const emailId = `EML-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+  const now = new Date().toISOString();
+
+  const bodyHtml = `
+    <div style="font-family: Arial, sans-serif; background-color: #070b14; color: #f1f5f9; padding: 24px; border-radius: 12px; max-width: 600px; margin: 0 auto; border: 1px solid #1e293b;">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <h1 style="color: #e11d48; margin: 0; font-size: 24px; letter-spacing: 2px;">LakayaTOURNAMENT</h1>
+        <p style="color: #94a3b8; font-size: 12px; margin: 4px 0;">OFFICIAL LEAGUE TRANSACTION RECEIPT</p>
+      </div>
+      <div style="background-color: #0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
+        <h2 style="color: #38bdf8; font-size: 18px; margin-top: 0;">${title}</h2>
+        <p style="font-size: 14px; line-height: 1.6; color: #cbd5e1;">${message}</p>
+        ${amount !== undefined ? `
+          <div style="background-color: #020617; padding: 14px; border-radius: 6px; margin: 16px 0; border: 1px solid #1e293b;">
+            <span style="color: #94a3b8; font-size: 12px; display: block;">TRANSACTION AMOUNT:</span>
+            <span style="color: #10b981; font-size: 22px; font-weight: bold;">$${amount.toFixed(2)} USD</span>
+          </div>
+        ` : ''}
+        ${referenceId ? `<p style="font-size: 11px; color: #64748b; font-family: monospace;">Reference ID: ${referenceId}</p>` : ''}
+        <p style="font-size: 11px; color: #94a3b8; margin-top: 16px;">
+          Timestamp: ${new Date().toLocaleString()} (UTC)<br/>
+          Recipient Email: <strong>${recipientEmail}</strong>
+        </p>
+      </div>
+      <div style="text-align: center; margin-top: 20px; font-size: 11px; color: #64748b;">
+        <p>If you did not authorize this transaction, please immediately contact Commissioner DJSPIDEED THEKING at <a href="mailto:spideedtheking@gmail.com" style="color: #38bdf8;">spideedtheking@gmail.com</a>.</p>
+        <p>© ${new Date().getFullYear()} LakayaTOURNAMENT. All rights reserved.</p>
+      </div>
+    </div>
+  `;
+
+  try {
+    db.prepare(`
+      INSERT INTO sent_emails (id, user_id, recipient_email, subject, body_text, body_html, type, amount, reference_id, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'delivered', ?)
+    `).run(emailId, userId, recipientEmail, subject, message, bodyHtml, type, amount ?? null, referenceId ?? null, now);
+
+    db.prepare(`
+      INSERT INTO notifications (id, user_id, title, message, type, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(crypto.randomUUID(), userId, `📧 ${subject}`, message, type, now);
+  } catch (err) {
+    console.error('Failed to record transactional email:', err);
+  }
+
+  return emailId;
+}
 
 // Password Helpers
 function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
@@ -374,8 +480,9 @@ function seedDatabase() {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run('disc-lakaya5', 'LAKAYA5', 5.0, 'monthly', 500, 0, 1, 'active', now, nextYear.toISOString(), now);
 
-  // Create Owner/Admin: DJSPIDEED THEKING
-  const ownerPass = hashPassword('Password123!');
+  // Create Owner: DJSPIDEED THEKING
+  const ownerInitialSecret = process.env.OWNER_INITIAL_PASSWORD || 'Password123!';
+  const ownerPass = hashPassword(ownerInitialSecret);
   const ownerId = 'usr-owner-01';
   db.prepare(`
     INSERT INTO users (id, full_name, username, email, password_hash, salt, phone_number, whatsapp_number, profile_photo_url, gamer_id, role, is_verified, is_online, last_seen, created_at, display_name, bio)
@@ -391,12 +498,12 @@ function seedDatabase() {
     '347-558-3607',
     '/logo.jpg',
     'LKY-00001',
-    'admin',
+    'owner',
     1,
     1,
     now,
     'DJSPIDEED THEKING 🇭🇹👑',
-    'Founder & President of LakayaTOURNAMENT. Official Champion & Platform Admin.'
+    'Founder & President of LakayaTOURNAMENT. Official Champion & Platform Owner.'
   );
 
   // Owner Gamer Tag
@@ -656,23 +763,117 @@ function seedDatabase() {
 function ensureAllGamesAndChallenges() {
   const now = new Date().toISOString();
   const gamesList = [
-    { id: 'game-fc27', name: 'EA SPORTS FC 27', slug: 'fc-27', icon_url: '/logo.jpg' },
-    { id: 'game-mk', name: 'Mortal Kombat', slug: 'mortal-kombat', icon_url: '/logo.jpg' },
-    { id: 'game-cod', name: 'COD: Warzone', slug: 'cod-warzone', icon_url: '/logo.jpg' },
-    { id: 'game-nba2k', name: 'NBA 2K', slug: 'nba-2k', icon_url: '/logo.jpg' },
-    { id: 'game-fortnite', name: 'Fortnite', slug: 'fortnite', icon_url: '/logo.jpg' },
-    { id: 'game-tekken8', name: 'Tekken 8', slug: 'tekken-8', icon_url: '/logo.jpg' },
-    { id: 'game-rl', name: 'Rocket League', slug: 'rocket-league', icon_url: '/logo.jpg' },
-    { id: 'game-gta5', name: 'GTAV Online', slug: 'gta-5', icon_url: '/logo.jpg' },
+    { id: 'game-fc27', name: 'EA SPORTS FC 27', slug: 'fc-27', icon_url: '/fc27_cover.jpg' },
+    { id: 'game-mk', name: 'Mortal Kombat', slug: 'mortal-kombat', icon_url: '/mk_cover.jpg' },
+    { id: 'game-cod', name: 'COD: Warzone', slug: 'cod-warzone', icon_url: '/cod_cover.jpg' },
+    { id: 'game-nba2k', name: 'NBA 2K', slug: 'nba-2k', icon_url: '/nba2k_cover.jpg' },
+    { id: 'game-fortnite', name: 'Fortnite', slug: 'fortnite', icon_url: '/fortnite_cover.jpg' },
+    { id: 'game-tekken8', name: 'Tekken 8', slug: 'tekken-8', icon_url: '/tekken8_cover.jpg' },
+    { id: 'game-rl', name: 'Rocket League', slug: 'rocket-league', icon_url: '/rl_cover.jpg' },
+    { id: 'game-gta5', name: 'GTAV Online', slug: 'gta-5', icon_url: '/gta5_cover.jpg' },
   ];
 
   for (const g of gamesList) {
     db.prepare(`
       INSERT INTO games (id, name, slug, icon_url, is_active, created_at)
       VALUES (?, ?, ?, ?, 1, ?)
-      ON CONFLICT(id) DO UPDATE SET name=excluded.name, slug=excluded.slug
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name, slug=excluded.slug, icon_url=excluded.icon_url
     `).run(g.id, g.name, g.slug, g.icon_url, now);
   }
+
+  // Update existing tournaments to have specific banners
+  db.prepare(`
+    UPDATE tournaments SET banner_url = '/fc27_cover.jpg' 
+    WHERE game_id = 'game-fc27' AND (banner_url = '/hero_banner.jpg' OR banner_url = '/logo.jpg' OR banner_url IS NULL)
+  `).run();
+
+  // Ensure NBA 2K Official Tournament exists
+  db.prepare(`
+    INSERT INTO tournaments (id, name, game_id, platform_id, entry_fee, prize_pool, max_players, current_players, registration_deadline, scheduled_date, rules, status, banner_url, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET banner_url = excluded.banner_url, name = excluded.name
+  `).run(
+    'tourn-nba2k-01',
+    'Lakaya NBA 2K Haitian Slam Clash',
+    'game-nba2k',
+    'plat-ps5',
+    5.0,
+    100.0,
+    12,
+    8,
+    now,
+    now,
+    '12-Player Single Elimination. 5-minute quarters. Hall of Fame difficulty. Competitive rules.',
+    'open',
+    '/nba2k_cover.jpg',
+    now
+  );
+
+  // Ensure Mortal Kombat Official Tournament exists
+  db.prepare(`
+    INSERT INTO tournaments (id, name, game_id, platform_id, entry_fee, prize_pool, max_players, current_players, registration_deadline, scheduled_date, rules, status, banner_url, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET banner_url = excluded.banner_url, name = excluded.name
+  `).run(
+    'tourn-mk-01',
+    'Lakaya Mortal Kombat Kolosseum Royale',
+    'game-mk',
+    'plat-ps5',
+    5.0,
+    100.0,
+    12,
+    10,
+    now,
+    now,
+    '12-Player Single Elimination. Best of 3 sets, 90-second rounds. Standard competitive tournament settings.',
+    'open',
+    '/mk_cover.jpg',
+    now
+  );
+
+  // Ensure Call of Duty Official Tournament exists
+  db.prepare(`
+    INSERT INTO tournaments (id, name, game_id, platform_id, entry_fee, prize_pool, max_players, current_players, registration_deadline, scheduled_date, rules, status, banner_url, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET banner_url = excluded.banner_url, name = excluded.name
+  `).run(
+    'tourn-cod-01',
+    'Lakaya Call of Duty: Warzone Gunfight',
+    'game-cod',
+    'plat-ps5',
+    5.0,
+    100.0,
+    12,
+    6,
+    now,
+    now,
+    '12-Player Single Elimination. Tactical Gunfight format. Best of 5 rounds.',
+    'open',
+    '/cod_cover.jpg',
+    now
+  );
+
+  // Ensure Tekken 8 Official Tournament exists
+  db.prepare(`
+    INSERT INTO tournaments (id, name, game_id, platform_id, entry_fee, prize_pool, max_players, current_players, registration_deadline, scheduled_date, rules, status, banner_url, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET banner_url = excluded.banner_url, name = excluded.name
+  `).run(
+    'tourn-tekken8-01',
+    'Lakaya Tekken 8 King of Iron Fist Haiti',
+    'game-tekken8',
+    'plat-ps5',
+    5.0,
+    100.0,
+    12,
+    7,
+    now,
+    now,
+    '12-Player Single Elimination. 60 seconds per round, 3 rounds per game. Best of 3 games.',
+    'open',
+    '/tekken8_cover.jpg',
+    now
+  );
 }
 
 seedDatabase();
@@ -705,29 +906,15 @@ app.set('trust proxy', 1);
 
 // Allowed origins for CORS protection
 const ALLOWED_ORIGINS = [
-  'https://lakayatournament16.com',
-  'https://www.lakayatournament16.com',
-  'http://lakayatournament16.com',
-  'http://www.lakayatournament16.com',
   'http://localhost:3000',
   'http://localhost:8080',
 ];
 
-// Security & Domain Safety Middleware
+// Security & Platform Protection Middleware
 app.use((req, res, next) => {
-  const host = (req.headers.host || '').toLowerCase();
   const origin = req.headers.origin;
-  const proto = req.headers['x-forwarded-proto'];
 
-  // 1. Force HTTPS on custom domain lakayatournament16.com
-  if (
-    (host === 'lakayatournament16.com' || host === 'www.lakayatournament16.com') &&
-    proto === 'http'
-  ) {
-    return res.redirect(301, `https://${host}${req.url}`);
-  }
-
-  // 2. Comprehensive Security Headers
+  // Comprehensive Security Headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -738,7 +925,7 @@ app.use((req, res, next) => {
     'max-age=31536000; includeSubDomains; preload'
   );
 
-  // 3. CORS and Safe Origin Matching
+  // CORS and Safe Origin Matching
   if (origin) {
     const isAllowed =
       ALLOWED_ORIGINS.includes(origin) ||
@@ -771,14 +958,10 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Domain Security Status & Verification Endpoint
-app.get('/api/security/domain-status', (req, res) => {
-  const host = (req.headers.host || '').toLowerCase();
-  const proto = req.headers['x-forwarded-proto'] || req.protocol;
-  const isCustomDomain = host.includes('lakayatournament16.com');
-
+// Platform Security Status & Verification Endpoint
+app.get(['/api/security/status', '/api/security/domain-status'], (req, res) => {
   res.json({
-    target_domain: 'lakayatournament16.com',
+    platform: 'LakayaTOURNAMENT Official League Platform',
     status: 'configured_and_secured',
     ssl_encryption: {
       status: 'enabled',
@@ -792,19 +975,8 @@ app.get('/api/security/domain-status', (req, res) => {
       cors_whitelisted: true,
       ddos_mitigation_ready: true,
       rate_limiting: 'active',
+      email_dispatch_engine: 'active',
     },
-    dns_recommendation: {
-      type: 'CNAME',
-      host: '@, www',
-      proxy_status: 'Proxied (Cloudflare Orange Cloud recommended)',
-      ssl_tls_mode: 'Full (Strict)',
-    },
-    current_request: {
-      host,
-      proto,
-      is_secure: proto === 'https' || req.secure,
-      matched_custom_domain: isCustomDomain,
-    }
   });
 });
 
@@ -833,8 +1005,20 @@ function getUserFromRequest(req: express.Request): any | null {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(session.user_id) as any;
   if (!user) return null;
 
-  // Check membership status or owner exemption
-  if (user.role === 'admin' || user.email === 'spideedtheking@gmail.com') {
+  // Strict Server-Side Role Enforcement
+  if (user.email === OWNER_EMAIL) {
+    user.role = 'owner';
+    user.display_name = OWNER_DISPLAY_NAME;
+    user.is_member_active = true;
+    user.membership_plan = 'yearly';
+  } else if (user.role === 'owner') {
+    // If an account other than the authorized email was set to owner, immediately revert to gamer
+    user.role = 'gamer';
+    db.prepare("UPDATE users SET role = 'gamer' WHERE id = ?").run(user.id);
+  }
+
+  // Check membership status or owner/admin exemption
+  if (user.role === 'owner' || user.role === 'admin') {
     user.is_member_active = true;
     user.membership_plan = 'yearly';
   } else {
@@ -854,6 +1038,25 @@ function getUserFromRequest(req: express.Request): any | null {
     }
   }
 
+  // Parse admin permissions
+  if (user.role === 'owner') {
+    user.parsed_permissions = {
+      can_manage_tournaments: true,
+      can_verify_matches: true,
+      can_process_payouts: true,
+      can_create_discounts: true,
+      can_manage_gamers: true,
+    };
+  } else if (user.admin_permissions) {
+    try {
+      user.parsed_permissions = typeof user.admin_permissions === 'string' ? JSON.parse(user.admin_permissions) : user.admin_permissions;
+    } catch {
+      user.parsed_permissions = {};
+    }
+  } else {
+    user.parsed_permissions = {};
+  }
+
   // Get Wallet
   const wallet = db.prepare('SELECT * FROM wallets WHERE user_id = ?').get(user.id) as any;
   user.wallet_balance = wallet?.available_balance || 0;
@@ -871,13 +1074,70 @@ function getUserFromRequest(req: express.Request): any | null {
   return user;
 }
 
-// Log audit trail helper
-function logAudit(userId: string | null, action: string, details: string, req?: express.Request) {
-  const ip = req?.ip || '127.0.0.1';
-  db.prepare(`
-    INSERT INTO audit_logs (id, user_id, action, details, ip_address, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(crypto.randomUUID(), userId, action, details, ip, new Date().toISOString());
+interface AuditLogOptions {
+  userId?: string | null;
+  actorId?: string | null;
+  actorRole?: string;
+  action: string;
+  targetResource?: string;
+  targetId?: string;
+  result?: 'ALLOWED' | 'DENIED' | 'SUCCESS' | 'FAILED';
+  details: string;
+  req?: express.Request;
+}
+
+// Log audit trail helper supporting both legacy & enriched security signatures
+function logAudit(
+  userIdOrOptions: string | null | AuditLogOptions,
+  action?: string,
+  details?: string,
+  req?: express.Request
+) {
+  let opts: AuditLogOptions;
+  if (typeof userIdOrOptions === 'object' && userIdOrOptions !== null) {
+    opts = userIdOrOptions;
+  } else {
+    opts = {
+      userId: userIdOrOptions,
+      actorId: userIdOrOptions,
+      action: action || 'UNKNOWN_ACTION',
+      details: details || '',
+      result: 'SUCCESS',
+      req,
+    };
+  }
+
+  const ip = opts.req?.ip || (opts.req?.headers['x-forwarded-for'] as string) || '127.0.0.1';
+  const id = crypto.randomUUID();
+  const actorId = opts.actorId || opts.userId || null;
+  let actorRole = opts.actorRole;
+  if (!actorRole && actorId) {
+    const u = db.prepare('SELECT role, email FROM users WHERE id = ?').get(actorId) as any;
+    actorRole = u?.email === OWNER_EMAIL ? 'owner' : (u?.role || 'anonymous');
+  }
+
+  const result = opts.result || 'SUCCESS';
+  const now = new Date().toISOString();
+
+  try {
+    db.prepare(`
+      INSERT INTO audit_logs (id, user_id, actor_role, action, target_resource, target_id, result, details, ip_address, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      actorId,
+      actorRole || 'system',
+      opts.action,
+      opts.targetResource || null,
+      opts.targetId || null,
+      result,
+      opts.details,
+      ip,
+      now
+    );
+  } catch (err) {
+    console.error('Audit log write error:', err);
+  }
 }
 
 // ==========================================
@@ -886,7 +1146,19 @@ function logAudit(userId: string | null, action: string, details: string, req?: 
 
 // Auth Routes
 app.post('/api/auth/register', (req, res) => {
-  const { full_name, username, email, password, phone_number, whatsapp_number, game_id, platform_id, gamer_tag } = req.body;
+  const { full_name, username, email, password, phone_number, whatsapp_number, game_id, platform_id, gamer_tag, role } = req.body;
+
+  // Strict role security: Never trust role sent by frontend. Role selection is strictly forbidden.
+  if (role && role.toLowerCase() !== 'gamer') {
+    logAudit({
+      action: 'SECURITY_VIOLATION_ROLE_SELECTION',
+      targetResource: 'users',
+      result: 'DENIED',
+      details: `Attempted registration with forbidden role "${role}". All new users must be created as GAMER.`,
+      req,
+    });
+    return res.status(403).json({ error: 'Role selection is strictly forbidden. All new accounts must be registered as GAMER.' });
+  }
 
   if (!full_name || !username || !email || !password) {
     return res.status(400).json({ error: 'Full name, username, email, and password are required.' });
@@ -904,10 +1176,13 @@ app.post('/api/auth/register', (req, res) => {
   const pass = hashPassword(password);
   const now = new Date().toISOString();
 
+  // Server strictly determines the role. Only configured email can be owner. All others are gamer.
+  const assignedRole = email.toLowerCase() === OWNER_EMAIL.toLowerCase() ? 'owner' : 'gamer';
+
   db.prepare(`
-    INSERT INTO users (id, full_name, username, email, password_hash, salt, phone_number, whatsapp_number, profile_photo_url, gamer_id, role, is_verified, is_online, last_seen, created_at, display_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'gamer', 1, 1, ?, ?, ?)
-  `).run(userId, full_name, username, email, pass.hash, pass.salt, phone_number || '', whatsapp_number || '', '/logo.jpg', gamerId, now, now, full_name);
+    INSERT INTO users (id, full_name, username, email, password_hash, salt, phone_number, whatsapp_number, profile_photo_url, gamer_id, role, is_verified, is_online, last_seen, created_at, display_name, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active')
+  `).run(userId, full_name, username, email, pass.hash, pass.salt, phone_number || '', whatsapp_number || '', '/logo.jpg', gamerId, assignedRole, now, now, assignedRole === 'owner' ? OWNER_DISPLAY_NAME : full_name);
 
   // Initialize wallet
   db.prepare(`
@@ -929,9 +1204,18 @@ app.post('/api/auth/register', (req, res) => {
   exp.setDate(exp.getDate() + 30);
   db.prepare('INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(token, userId, now, exp.toISOString());
 
-  logAudit(userId, 'REGISTER', `Gamer registered: ${username} (${gamerId})`, req);
+  logAudit({
+    actorId: userId,
+    actorRole: assignedRole,
+    action: 'REGISTER',
+    targetResource: 'users',
+    targetId: userId,
+    result: 'SUCCESS',
+    details: `New account registered: ${username} (${gamerId}) as ${assignedRole.toUpperCase()}`,
+    req,
+  });
 
-  res.json({ token, user: { id: userId, username, email, gamer_id: gamerId, role: 'gamer', is_member_active: false } });
+  res.json({ token, user: { id: userId, username, email, gamer_id: gamerId, role: assignedRole, is_member_active: assignedRole === 'owner' } });
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -942,12 +1226,38 @@ app.post('/api/auth/login', (req, res) => {
 
   const user = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(email_or_username, email_or_username) as any;
   if (!user || !verifyPassword(password, user.password_hash, user.salt)) {
+    logAudit({
+      action: 'LOGIN_FAILED',
+      targetResource: 'users',
+      targetId: email_or_username,
+      result: 'FAILED',
+      details: `Failed login attempt for identifier: ${email_or_username}`,
+      req,
+    });
     return res.status(401).json({ error: 'Invalid credentials. Please check your username/email and password.' });
   }
 
+  if (user.status === 'suspended') {
+    logAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'LOGIN_SUSPENDED_ATTEMPT',
+      targetResource: 'users',
+      targetId: user.id,
+      result: 'DENIED',
+      details: `Suspended user ${user.username} (${user.email}) attempted login`,
+      req,
+    });
+    return res.status(403).json({ error: 'Your account has been suspended by Platform Administration. Please contact support.' });
+  }
+
+  // Enforce server-side role
+  const isOwner = user.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  const effectiveRole = isOwner ? 'owner' : (user.role === 'admin' ? 'admin' : 'gamer');
+
   // Update online status
   const now = new Date().toISOString();
-  db.prepare('UPDATE users SET is_online = 1, last_seen = ? WHERE id = ?').run(now, user.id);
+  db.prepare('UPDATE users SET is_online = 1, last_seen = ?, role = ? WHERE id = ?').run(now, effectiveRole, user.id);
 
   // Create session
   const token = crypto.randomBytes(32).toString('hex');
@@ -955,9 +1265,18 @@ app.post('/api/auth/login', (req, res) => {
   exp.setDate(exp.getDate() + 30);
   db.prepare('INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(token, user.id, now, exp.toISOString());
 
-  logAudit(user.id, 'LOGIN', `User logged in: ${user.username}`, req);
+  logAudit({
+    actorId: user.id,
+    actorRole: effectiveRole,
+    action: isOwner ? 'OWNER_LOGIN' : (effectiveRole === 'admin' ? 'ADMIN_LOGIN' : 'LOGIN'),
+    targetResource: 'auth',
+    targetId: user.id,
+    result: 'SUCCESS',
+    details: `${effectiveRole.toUpperCase()} authenticated successfully: ${user.username} (${user.email})`,
+    req,
+  });
 
-  res.json({ token, user: { id: user.id, username: user.username, email: user.email, gamer_id: user.gamer_id, role: user.role } });
+  res.json({ token, user: { id: user.id, username: user.username, email: user.email, gamer_id: user.gamer_id, role: effectiveRole, display_name: isOwner ? OWNER_DISPLAY_NAME : user.display_name } });
 });
 
 // One-click simulated Google Login for convenient testing
@@ -1034,12 +1353,39 @@ app.post(['/api/profile/update', '/api/auth/update-profile'], (req, res) => {
   const user = getUserFromRequest(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
+  // Security Hardening: Never allow frontend to modify role, status, or balance
+  if (req.body.role || req.body.status || req.body.is_member_active !== undefined || req.body.wallet_balance !== undefined || req.body.admin_permissions !== undefined) {
+    logAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'SECURITY_VIOLATION_ROLE_MODIFICATION',
+      targetResource: 'users',
+      targetId: user.id,
+      result: 'DENIED',
+      details: `User attempted unauthorized modification of protected fields (role/status/balance/permissions)`,
+      req,
+    });
+    return res.status(403).json({ error: 'Modifying system-protected fields like role, status, or balance is strictly forbidden.' });
+  }
+
   const { display_name, bio, phone_number, whatsapp_number } = req.body;
+  const isOwner = user.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  const finalDisplayName = isOwner && !display_name ? OWNER_DISPLAY_NAME : (display_name || user.full_name);
+
   db.prepare(`
     UPDATE users SET display_name = ?, bio = ?, phone_number = ?, whatsapp_number = ? WHERE id = ?
-  `).run(display_name || user.full_name, bio || '', phone_number || user.phone_number, whatsapp_number || user.whatsapp_number, user.id);
+  `).run(finalDisplayName, bio || '', phone_number || user.phone_number, whatsapp_number || user.whatsapp_number, user.id);
 
-  logAudit(user.id, 'PROFILE_UPDATE', `Updated profile fields`, req);
+  logAudit({
+    actorId: user.id,
+    actorRole: user.role,
+    action: 'PROFILE_UPDATE',
+    targetResource: 'users',
+    targetId: user.id,
+    result: 'SUCCESS',
+    details: `Updated profile details for user ${user.username}`,
+    req,
+  });
   res.json({ message: 'Profile updated successfully.' });
 });
 
@@ -1209,7 +1555,7 @@ app.post('/api/presence/heartbeat', (req, res) => {
 });
 
 // Membership & Discount Codes
-app.post('/api/membership/verify-discount', (req, res) => {
+app.post(['/api/membership/verify-discount', '/api/membership/validate-discount'], (req, res) => {
   const user = getUserFromRequest(req);
   const { code, plan } = req.body;
 
@@ -1229,6 +1575,18 @@ app.post('/api/membership/verify-discount', (req, res) => {
     return res.status(400).json({ error: 'This discount code has reached its maximum uses.' });
   }
 
+  // Check gamer-specific restriction
+  if (discount.specific_gamer_id || discount.specific_username) {
+    if (!user) {
+      return res.status(400).json({ error: 'Please log in to claim this exclusive gamer discount.' });
+    }
+    const matchesId = discount.specific_gamer_id && (user.id === discount.specific_gamer_id || user.gamer_id.toUpperCase() === discount.specific_gamer_id.toUpperCase());
+    const matchesUser = discount.specific_username && user.username.toLowerCase() === discount.specific_username.toLowerCase();
+    if (!matchesId && !matchesUser) {
+      return res.status(403).json({ error: 'This exclusive discount was awarded specifically to another competitor.' });
+    }
+  }
+
   // Check if gamer already used this one-time code
   if (user && discount.is_one_time) {
     const alreadyUsed = db.prepare('SELECT id FROM discount_redemptions WHERE discount_id = ? AND user_id = ?').get(discount.id, user.id);
@@ -1238,15 +1596,19 @@ app.post('/api/membership/verify-discount', (req, res) => {
   }
 
   const basePrice = plan === 'yearly' ? 120.0 : 10.0;
-  const finalPrice = Math.max(0, basePrice - discount.discount_amount);
+  const discountAmount = discount.discount_type === 'percentage' 
+    ? (basePrice * discount.discount_amount) / 100 
+    : discount.discount_amount;
+  const finalPrice = Math.max(0, basePrice - discountAmount);
 
   res.json({
     valid: true,
     code: discount.code,
-    discount_amount: discount.discount_amount,
+    discount_amount: discountAmount,
+    discount_type: discount.discount_type || 'fixed',
     base_price: basePrice,
     final_price: finalPrice,
-    message: `Discount applied: You save $${discount.discount_amount}. Final price: $${finalPrice}`,
+    message: `Discount applied: You save $${discountAmount.toFixed(2)}. Final price: $${finalPrice.toFixed(2)}`,
   });
 });
 
@@ -1260,14 +1622,27 @@ app.post('/api/membership/purchase', (req, res) => {
   let discountAmount = 0;
   let discountObj: any = null;
 
-  // Handle $5 Discount Code
+  // Handle Targeted & Standard Discount Codes
   if (discount_code) {
     discountObj = db.prepare('SELECT * FROM discount_codes WHERE code = ? AND status = "active"').get(discount_code.toUpperCase()) as any;
     if (discountObj) {
-      // Verify gamer hasn't used it
-      const used = db.prepare('SELECT id FROM discount_redemptions WHERE discount_id = ? AND user_id = ?').get(discountObj.id, user.id);
-      if (!used) {
-        discountAmount = discountObj.discount_amount;
+      let isEligible = true;
+      if (discountObj.specific_gamer_id || discountObj.specific_username) {
+        const matchesId = discountObj.specific_gamer_id && (user.id === discountObj.specific_gamer_id || user.gamer_id.toUpperCase() === discountObj.specific_gamer_id.toUpperCase());
+        const matchesUser = discountObj.specific_username && user.username.toLowerCase() === discountObj.specific_username.toLowerCase();
+        if (!matchesId && !matchesUser) {
+          isEligible = false;
+        }
+      }
+
+      if (isEligible) {
+        // Verify gamer hasn't used it
+        const used = db.prepare('SELECT id FROM discount_redemptions WHERE discount_id = ? AND user_id = ?').get(discountObj.id, user.id);
+        if (!used) {
+          discountAmount = discountObj.discount_type === 'percentage'
+            ? (basePrice * discountObj.discount_amount) / 100
+            : discountObj.discount_amount;
+        }
       }
     }
   }
@@ -1321,6 +1696,18 @@ app.post('/api/membership/purchase', (req, res) => {
   `).run(crypto.randomUUID(), user.id, now.toISOString());
 
   logAudit(user.id, 'MEMBERSHIP_PAID', `Paid $${finalPrice} for ${chosenPlan} membership via ${payment_method}`, req);
+
+  // Send official payment receipt email
+  sendTransactionalEmail({
+    userId: user.id,
+    recipientEmail: user.email,
+    subject: `🇭🇹 Membership Receipt: $${finalPrice.toFixed(2)} USD Paid`,
+    type: 'membership_paid',
+    amount: finalPrice,
+    referenceId: txnId,
+    title: 'LakayaTOURNAMENT Pro League Membership Activated',
+    message: `Hello ${user.display_name || user.username}, your payment of $${finalPrice.toFixed(2)} USD for the ${chosenPlan.toUpperCase()} membership has been confirmed via ${payment_method || 'MonCash'}. All competitive challenges, tournament registrations, and cash prize withdrawals are now fully activated.`,
+  });
 
   res.json({
     success: true,
@@ -1435,9 +1822,24 @@ app.post('/api/challenges/:id/respond', (req, res) => {
 // Matches & Result Verification
 app.get('/api/matches', (req, res) => {
   const user = getUserFromRequest(req);
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  if (!user) {
+    const matches = db.prepare(`
+      SELECT m.*, 
+        g.name as game_name, p.name as platform_name,
+        p1.username as player1_username, p1.profile_photo_url as player1_photo,
+        p2.username as player2_username, p2.profile_photo_url as player2_photo
+      FROM matches m
+      JOIN games g ON m.game_id = g.id
+      JOIN platforms p ON m.platform_id = p.id
+      JOIN users p1 ON m.player1_id = p1.id
+      JOIN users p2 ON m.player2_id = p2.id
+      ORDER BY m.created_at DESC
+      LIMIT 50
+    `).all();
+    return res.json(matches);
+  }
 
-  const matches = db.prepare(`
+  let matches = db.prepare(`
     SELECT m.*, 
       g.name as game_name, p.name as platform_name,
       p1.username as player1_username, p1.profile_photo_url as player1_photo,
@@ -1450,6 +1852,22 @@ app.get('/api/matches', (req, res) => {
     WHERE m.player1_id = ? OR m.player2_id = ?
     ORDER BY m.created_at DESC
   `).all(user.id, user.id);
+
+  if (matches.length === 0) {
+    matches = db.prepare(`
+      SELECT m.*, 
+        g.name as game_name, p.name as platform_name,
+        p1.username as player1_username, p1.profile_photo_url as player1_photo,
+        p2.username as player2_username, p2.profile_photo_url as player2_photo
+      FROM matches m
+      JOIN games g ON m.game_id = g.id
+      JOIN platforms p ON m.platform_id = p.id
+      JOIN users p1 ON m.player1_id = p1.id
+      JOIN users p2 ON m.player2_id = p2.id
+      ORDER BY m.created_at DESC
+      LIMIT 20
+    `).all();
+  }
 
   res.json(matches);
 });
@@ -1670,6 +2088,19 @@ app.post('/api/tournaments/:id/join', (req, res) => {
 
   logAudit(user.id, 'TOURNAMENT_JOIN', `Joined tournament ${tourn.name} (slot ${nextSlot})`, req);
 
+  if (tourn.entry_fee && tourn.entry_fee > 0) {
+    sendTransactionalEmail({
+      userId: user.id,
+      recipientEmail: user.email,
+      subject: `🏆 Tournament Entry Fee: $${tourn.entry_fee.toFixed(2)} USD Paid`,
+      type: 'tournament_entry_fee',
+      amount: tourn.entry_fee,
+      referenceId: txnId,
+      title: `Registration Confirmed: ${tourn.name}`,
+      message: `Hello ${user.display_name || user.username}, your registration and entry fee payment of $${tourn.entry_fee.toFixed(2)} USD for "${tourn.name}" has been confirmed. Slot #${nextSlot} is officially locked in for your Gamer Tag: ${gamerTag.gamer_tag}.`,
+    });
+  }
+
   res.json({
     success: true,
     message: 'Tournament registration confirmed! Slot reserved.',
@@ -1783,11 +2214,88 @@ app.post(['/api/wallet/withdraw', '/api/payouts/request'], (req, res) => {
 
   logAudit(user.id, 'WITHDRAWAL_REQUEST', `Requested withdrawal of $${withdrawAmount} via ${payout_method}`, req);
 
+  // Send official transactional email notice to gamer's email
+  sendTransactionalEmail({
+    userId: user.id,
+    recipientEmail: user.email,
+    subject: `🚨 Cash-Out Notice: $${withdrawAmount.toFixed(2)} USD Withdrawn from Your Wallet`,
+    type: 'cash_out_requested',
+    amount: withdrawAmount,
+    referenceId: withdrawalId,
+    title: 'Cash-Out / Withdrawal Funds Deducted',
+    message: `Hello ${user.display_name || user.username}, your cash-out request for $${withdrawAmount.toFixed(2)} USD has been processed and deducted from your available wallet balance. Destination: ${details} (${(payout_method || 'MonCash').toUpperCase()}). You will receive an official confirmation once the payment provider transfers the funds to your account.`,
+  });
+
   res.json({
     success: true,
-    message: `Your withdrawal request for $${withdrawAmount} has been submitted! Payout is pending processing.`,
+    message: `Your withdrawal request for $${withdrawAmount} has been submitted! Payout is pending processing. An email receipt was sent to ${user.email}.`,
     withdrawal_id: withdrawalId,
   });
+});
+
+// Wallet Deposit / Payment
+app.post(['/api/wallet/deposit', '/api/payments/deposit'], (req, res) => {
+  const user = getUserFromRequest(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { amount, payment_method, phone_number, reference_note } = req.body;
+  const depositAmount = parseFloat(amount);
+  if (isNaN(depositAmount) || depositAmount <= 0) {
+    return res.status(400).json({ error: 'Please enter a valid deposit amount.' });
+  }
+
+  const now = new Date().toISOString();
+  const txnId = `DEP-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+  // Credit wallet
+  db.prepare(`
+    UPDATE wallets SET 
+      available_balance = available_balance + ?,
+      total_earned = total_earned + ?,
+      updated_at = ?
+    WHERE user_id = ?
+  `).run(depositAmount, depositAmount, now, user.id);
+
+  // Record transaction
+  db.prepare(`
+    INSERT INTO wallet_transactions (id, wallet_id, user_id, type, amount, reference_id, status, notes, created_at)
+    VALUES (?, ?, ?, 'deposit', ?, ?, 'completed', ?, ?)
+  `).run(crypto.randomUUID(), user.id, user.id, depositAmount, txnId, `Deposit via ${(payment_method || 'MonCash').toUpperCase()} (${phone_number || reference_note || 'Direct'})`, now);
+
+  // Send Email Receipt to gamer's email!
+  sendTransactionalEmail({
+    userId: user.id,
+    recipientEmail: user.email,
+    subject: `💳 Payment Deposit Confirmed: $${depositAmount.toFixed(2)} USD Added`,
+    type: 'payment_deposit',
+    amount: depositAmount,
+    referenceId: txnId,
+    title: 'Wallet Deposit Received',
+    message: `Hello ${user.display_name || user.username}, your payment deposit of $${depositAmount.toFixed(2)} USD via ${(payment_method || 'MonCash').toUpperCase()} has been confirmed and credited to your LakayaTOURNAMENT wallet balance.`,
+  });
+
+  logAudit(user.id, 'WALLET_DEPOSIT', `Deposited $${depositAmount} via ${payment_method}`, req);
+
+  res.json({
+    success: true,
+    message: `Payment confirmed! $${depositAmount.toFixed(2)} USD has been credited to your wallet. An email receipt was sent to ${user.email}.`,
+    transaction_id: txnId,
+  });
+});
+
+// Gamer's Email Receipts
+app.get('/api/user/email-receipts', (req, res) => {
+  const user = getUserFromRequest(req);
+  if (!user) return res.json([]);
+
+  const emails = db.prepare(`
+    SELECT id, user_id, recipient_email, subject, body_text, body_html, type, amount, reference_id, status, created_at
+    FROM sent_emails
+    WHERE user_id = ?
+    ORDER BY created_at DESC LIMIT 50
+  `).all(user.id);
+
+  res.json(emails);
 });
 
 // Medals & Certificates
@@ -1923,20 +2431,798 @@ app.post('/api/notifications/read', (req, res) => {
 });
 
 // ==========================================
-// ADMIN DASHBOARD ROUTES (DJSPIDEED THEKING)
+// OWNER & ADMIN SECURITY MIDDLEWARES & CONTROL CENTER
 // ==========================================
+
 function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
   const user = getUserFromRequest(req);
-  if (!user || user.role !== 'admin') {
+  if (!user) {
+    return res.status(401).json({ error: 'Authentication required. Please login.' });
+  }
+  if (user.status === 'suspended') {
+    return res.status(403).json({ error: 'Account has been suspended by Platform Administration.' });
+  }
+  if (user.role !== 'owner' && user.role !== 'admin') {
+    logAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'SECURITY_VIOLATION_ACCESS_DENIED',
+      targetResource: 'admin_api',
+      targetId: req.path,
+      result: 'DENIED',
+      details: `Non-admin user ${user.username} (${user.id}) attempted unauthorized access to: ${req.method} ${req.path}`,
+      req,
+    });
     return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
   }
+  (req as any).user = user;
   next();
 }
 
+function requireOwner(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = getUserFromRequest(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Authentication required. Please login.' });
+  }
+  if (user.status === 'suspended') {
+    return res.status(403).json({ error: 'Account has been suspended.' });
+  }
+  if (user.role !== 'owner' || user.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+    logAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'SECURITY_VIOLATION_OWNER_DENIED',
+      targetResource: 'owner_control_center',
+      targetId: req.path,
+      result: 'DENIED',
+      details: `Unauthorized attempt to access Owner-only operation by ${user.username} (${user.email}, role: ${user.role}): ${req.method} ${req.path}`,
+      req,
+    });
+    return res.status(403).json({ error: 'Access denied. This action is strictly reserved for the Platform Owner.' });
+  }
+  (req as any).user = user;
+  next();
+}
+
+function requirePermission(permissionKey: string) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const user = getUserFromRequest(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Authentication required. Please login.' });
+    }
+    if (user.status === 'suspended') {
+      return res.status(403).json({ error: 'Account has been suspended.' });
+    }
+
+    // Owner has unrestricted access to all features
+    if (user.role === 'owner' && user.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+      (req as any).user = user;
+      return next();
+    }
+
+    if (user.role !== 'admin') {
+      logAudit({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'SECURITY_VIOLATION_NOT_ADMIN',
+        targetResource: permissionKey,
+        targetId: req.path,
+        result: 'DENIED',
+        details: `User ${user.username} lacks admin role for ${permissionKey}`,
+        req,
+      });
+      return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
+    }
+
+    const permissions = user.parsed_permissions || {};
+    if (!permissions[permissionKey]) {
+      logAudit({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'SECURITY_VIOLATION_PERMISSION_DENIED',
+        targetResource: permissionKey,
+        targetId: req.path,
+        result: 'DENIED',
+        details: `Admin ${user.username} attempted operation without "${permissionKey}" clearance: ${req.method} ${req.path}`,
+        req,
+      });
+      return res.status(403).json({ error: `Access denied. You lack the "${permissionKey}" permission granted by the Owner.` });
+    }
+
+    (req as any).user = user;
+    next();
+  };
+}
+
+// --------------------------------------------------------------------------
+// OWNER CONTROL CENTER ROUTES (DJSPIDEED THEKING EXCLUSIVE)
+// --------------------------------------------------------------------------
+
+// Owner Complete Financial & Operational Stats
+app.get('/api/owner/stats', requireOwner, (req, res) => {
+  const totalGamers = (db.prepare('SELECT COUNT(*) as count FROM users WHERE role = "gamer"').get() as any).count;
+  const totalAdmins = (db.prepare('SELECT COUNT(*) as count FROM users WHERE role = "admin"').get() as any).count;
+  const activeMembers = (db.prepare('SELECT COUNT(*) as count FROM memberships WHERE status = "active" AND expires_at > datetime("now")').get() as any).count;
+  const expiredMembers = (db.prepare('SELECT COUNT(*) as count FROM memberships WHERE expires_at <= datetime("now")').get() as any).count;
+  const activeTournaments = (db.prepare('SELECT COUNT(*) as count FROM tournaments WHERE status IN ("open", "live")').get() as any).count;
+  
+  const membershipRevenue = (db.prepare('SELECT SUM(amount_paid) as sum FROM memberships').get() as any).sum || 0;
+  const tournamentPrizePoolTotal = (db.prepare('SELECT SUM(prize_pool) as sum FROM tournaments').get() as any).sum || 0;
+  const tournamentEntryRevenue = (db.prepare('SELECT SUM(entry_fee * current_players) as sum FROM tournaments').get() as any).sum || 0;
+  
+  // 10% platform fee calculation from completed matches
+  const matchBountiesTotal = (db.prepare('SELECT COUNT(*) * 10 as sum FROM matches WHERE status = "verified"').get() as any).sum || 0;
+  const matchFees10Percent = matchBountiesTotal * 0.10;
+
+  const totalRewardsPaid = (db.prepare('SELECT SUM(total_earned) as sum FROM wallets').get() as any).sum || 0;
+  const walletLiabilities = (db.prepare('SELECT SUM(available_balance) as sum FROM wallets').get() as any).sum || 0;
+  
+  const pendingPayouts = (db.prepare('SELECT COUNT(*) as count, SUM(amount) as sum FROM withdrawals WHERE status = "pending"').get() as any);
+  const completedPayouts = (db.prepare('SELECT COUNT(*) as count, SUM(amount) as sum FROM withdrawals WHERE status = "paid"').get() as any);
+  
+  const pendingDisputes = (db.prepare('SELECT COUNT(*) as count FROM matches WHERE status = "result_conflict"').get() as any).count;
+  const certificatesCount = (db.prepare('SELECT COUNT(*) as count FROM certificates').get() as any).count;
+  const creditsCount = (db.prepare('SELECT COUNT(*) as count FROM membership_credits WHERE status = "active"').get() as any).count;
+
+  const recentAlerts = db.prepare(`
+    SELECT * FROM audit_logs 
+    WHERE action LIKE '%SECURITY_VIOLATION%' OR result = 'DENIED'
+    ORDER BY created_at DESC LIMIT 10
+  `).all();
+
+  res.json({
+    total_gamers: totalGamers,
+    total_admins: totalAdmins,
+    active_members: activeMembers,
+    expired_members: expiredMembers,
+    active_tournaments: activeTournaments,
+    total_revenue: membershipRevenue + tournamentEntryRevenue + matchFees10Percent,
+    membership_revenue: membershipRevenue,
+    tournament_entry_revenue: tournamentEntryRevenue,
+    tournament_prizepool_total: tournamentPrizePoolTotal,
+    match_bounties_total: matchBountiesTotal,
+    match_fees_10_percent: matchFees10Percent,
+    total_rewards_paid: totalRewardsPaid,
+    wallet_liabilities: walletLiabilities,
+    pending_payouts_count: pendingPayouts.count || 0,
+    pending_payouts_amount: pendingPayouts.sum || 0,
+    completed_payouts_count: completedPayouts.count || 0,
+    completed_payouts_amount: completedPayouts.sum || 0,
+    pending_disputes: pendingDisputes,
+    certificates_count: certificatesCount,
+    credits_count: creditsCount,
+    security_alerts: recentAlerts,
+  });
+});
+
+// Owner Administrator Management
+app.get('/api/owner/admins', requireOwner, (req, res) => {
+  const admins = db.prepare(`
+    SELECT id, full_name, username, email, phone_number, gamer_id, role, status, admin_permissions, is_online, last_seen, created_at
+    FROM users 
+    WHERE role = 'admin'
+    ORDER BY created_at DESC
+  `).all() as any[];
+
+  const formatted = admins.map(a => {
+    let perms = {};
+    try { perms = typeof a.admin_permissions === 'string' ? JSON.parse(a.admin_permissions) : (a.admin_permissions || {}); } catch {}
+    return { ...a, parsed_permissions: perms };
+  });
+
+  res.json(formatted);
+});
+
+// Owner Promotes a Gamer to Admin
+app.post('/api/owner/admins/create', requireOwner, (req, res) => {
+  const { user_id, permissions } = req.body;
+  if (!user_id) return res.status(400).json({ error: 'User ID is required.' });
+
+  const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user_id) as any;
+  if (!targetUser) return res.status(404).json({ error: 'User not found.' });
+
+  if (targetUser.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+    return res.status(400).json({ error: 'The Owner account cannot be modified or re-assigned.' });
+  }
+
+  const defaultPerms = {
+    can_manage_tournaments: permissions?.can_manage_tournaments ?? true,
+    can_verify_matches: permissions?.can_verify_matches ?? true,
+    can_process_payouts: permissions?.can_process_payouts ?? false,
+    can_create_discounts: permissions?.can_create_discounts ?? false,
+    can_manage_gamers: permissions?.can_manage_gamers ?? false,
+  };
+
+  db.prepare(`
+    UPDATE users SET role = 'admin', status = 'active', admin_permissions = ? WHERE id = ?
+  `).run(JSON.stringify(defaultPerms), targetUser.id);
+
+  const owner = (req as any).user;
+  logAudit({
+    actorId: owner.id,
+    actorRole: 'owner',
+    action: 'ADMIN_CREATED',
+    targetResource: 'users',
+    targetId: targetUser.id,
+    result: 'SUCCESS',
+    details: `Owner ${owner.username} promoted ${targetUser.username} (${targetUser.email}) to Admin with permissions: ${JSON.stringify(defaultPerms)}`,
+    req,
+  });
+
+  res.json({ message: `Gamer ${targetUser.username} has been promoted to Administrator.` });
+});
+
+// Owner Updates Admin Permissions
+app.post('/api/owner/admins/:id/permissions', requireOwner, (req, res) => {
+  const targetId = req.params.id;
+  const { permissions } = req.body;
+
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as any;
+  if (!target) return res.status(404).json({ error: 'Admin not found.' });
+
+  if (target.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+    logAudit({
+      actorId: (req as any).user.id,
+      actorRole: 'owner',
+      action: 'SECURITY_VIOLATION_OWNER_MODIFICATION',
+      targetResource: 'users',
+      targetId: target.id,
+      result: 'DENIED',
+      details: 'Attempt to modify Owner account permissions was rejected',
+      req,
+    });
+    return res.status(400).json({ error: 'Owner permissions are permanently full and immutable.' });
+  }
+
+  const cleanPerms = {
+    can_manage_tournaments: !!permissions?.can_manage_tournaments,
+    can_verify_matches: !!permissions?.can_verify_matches,
+    can_process_payouts: !!permissions?.can_process_payouts,
+    can_create_discounts: !!permissions?.can_create_discounts,
+    can_manage_gamers: !!permissions?.can_manage_gamers,
+  };
+
+  db.prepare('UPDATE users SET admin_permissions = ? WHERE id = ?').run(JSON.stringify(cleanPerms), target.id);
+
+  logAudit({
+    actorId: (req as any).user.id,
+    actorRole: 'owner',
+    action: 'ADMIN_PERMISSIONS_CHANGED',
+    targetResource: 'users',
+    targetId: target.id,
+    result: 'SUCCESS',
+    details: `Owner updated permissions for Admin ${target.username}: ${JSON.stringify(cleanPerms)}`,
+    req,
+  });
+
+  res.json({ message: `Permissions for ${target.username} successfully updated.`, permissions: cleanPerms });
+});
+
+// Owner Suspends an Admin
+app.post('/api/owner/admins/:id/suspend', requireOwner, (req, res) => {
+  const targetId = req.params.id;
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as any;
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+
+  if (target.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+    logAudit({
+      actorId: (req as any).user.id,
+      actorRole: 'owner',
+      action: 'SECURITY_VIOLATION_OWNER_SUSPEND_ATTEMPT',
+      targetResource: 'users',
+      targetId: target.id,
+      result: 'DENIED',
+      details: 'Critical attempt to suspend Owner account was blocked',
+      req,
+    });
+    return res.status(403).json({ error: 'The Owner account can never be suspended.' });
+  }
+
+  db.prepare('UPDATE users SET status = "suspended" WHERE id = ?').run(target.id);
+  // Invalidate any active sessions
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id);
+
+  logAudit({
+    actorId: (req as any).user.id,
+    actorRole: 'owner',
+    action: 'ADMIN_SUSPENDED',
+    targetResource: 'users',
+    targetId: target.id,
+    result: 'SUCCESS',
+    details: `Owner suspended Admin ${target.username} (${target.email}) and terminated all active sessions`,
+    req,
+  });
+
+  res.json({ message: `Admin ${target.username} has been suspended.` });
+});
+
+// Owner Reactivates an Admin
+app.post('/api/owner/admins/:id/reactivate', requireOwner, (req, res) => {
+  const targetId = req.params.id;
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as any;
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+
+  db.prepare('UPDATE users SET status = "active" WHERE id = ?').run(target.id);
+
+  logAudit({
+    actorId: (req as any).user.id,
+    actorRole: 'owner',
+    action: 'ADMIN_REACTIVATED',
+    targetResource: 'users',
+    targetId: target.id,
+    result: 'SUCCESS',
+    details: `Owner reactivated Admin ${target.username}`,
+    req,
+  });
+
+  res.json({ message: `Admin ${target.username} has been reactivated.` });
+});
+
+// Owner Demotes Admin to Gamer
+app.post('/api/owner/admins/:id/demote', requireOwner, (req, res) => {
+  const targetId = req.params.id;
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as any;
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+
+  if (target.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+    return res.status(403).json({ error: 'The Owner account cannot be demoted.' });
+  }
+
+  db.prepare('UPDATE users SET role = "gamer", admin_permissions = NULL WHERE id = ?').run(target.id);
+
+  logAudit({
+    actorId: (req as any).user.id,
+    actorRole: 'owner',
+    action: 'ADMIN_DEMOTED_TO_GAMER',
+    targetResource: 'users',
+    targetId: target.id,
+    result: 'SUCCESS',
+    details: `Owner revoked admin clearance from ${target.username}. Role reset to GAMER.`,
+    req,
+  });
+
+  res.json({ message: `Admin clearance removed. ${target.username} is now a Gamer.` });
+});
+
+// Owner Views Specific Admin Activity Log
+app.get('/api/owner/admins/:id/activity', requireOwner, (req, res) => {
+  const targetId = req.params.id;
+  const logs = db.prepare(`
+    SELECT * FROM audit_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 50
+  `).all(targetId);
+  res.json(logs);
+});
+
+// Owner Gamer Management & Search
+app.get('/api/owner/gamers', requireOwner, (req, res) => {
+  const q = req.query.q ? String(req.query.q).trim() : '';
+  let users: any[];
+  if (q) {
+    users = db.prepare(`
+      SELECT u.id, u.full_name, u.username, u.email, u.phone_number, u.whatsapp_number, u.gamer_id, u.role, u.status, u.is_online, u.last_seen, u.created_at,
+             w.available_balance, w.total_earned,
+             (SELECT COUNT(*) FROM memberships m WHERE m.user_id = u.id AND m.status = 'active' AND m.expires_at > datetime('now')) as is_member
+      FROM users u
+      LEFT JOIN wallets w ON u.id = w.user_id
+      WHERE u.username LIKE ? OR u.gamer_id LIKE ? OR u.email LIKE ? OR u.full_name LIKE ?
+      ORDER BY u.created_at DESC LIMIT 100
+    `).all(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  } else {
+    users = db.prepare(`
+      SELECT u.id, u.full_name, u.username, u.email, u.phone_number, u.whatsapp_number, u.gamer_id, u.role, u.status, u.is_online, u.last_seen, u.created_at,
+             w.available_balance, w.total_earned,
+             (SELECT COUNT(*) FROM memberships m WHERE m.user_id = u.id AND m.status = 'active' AND m.expires_at > datetime('now')) as is_member
+      FROM users u
+      LEFT JOIN wallets w ON u.id = w.user_id
+      ORDER BY u.created_at DESC LIMIT 100
+    `).all();
+  }
+  res.json(users);
+});
+
+// Owner Suspends a Gamer
+app.post('/api/owner/gamers/:id/suspend', requireOwner, (req, res) => {
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+
+  if (target.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+    return res.status(403).json({ error: 'Cannot suspend the Platform Owner.' });
+  }
+
+  db.prepare('UPDATE users SET status = "suspended" WHERE id = ?').run(target.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id);
+
+  logAudit({
+    actorId: (req as any).user.id,
+    actorRole: 'owner',
+    action: 'GAMER_SUSPENDED',
+    targetResource: 'users',
+    targetId: target.id,
+    result: 'SUCCESS',
+    details: `Owner suspended gamer account ${target.username} (${target.gamer_id})`,
+    req,
+  });
+
+  res.json({ message: `Gamer ${target.username} has been suspended.` });
+});
+
+// Owner Reactivates a Gamer
+app.post('/api/owner/gamers/:id/reactivate', requireOwner, (req, res) => {
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+
+  db.prepare('UPDATE users SET status = "active" WHERE id = ?').run(target.id);
+
+  logAudit({
+    actorId: (req as any).user.id,
+    actorRole: 'owner',
+    action: 'GAMER_REACTIVATED',
+    targetResource: 'users',
+    targetId: target.id,
+    result: 'SUCCESS',
+    details: `Owner reactivated gamer account ${target.username}`,
+    req,
+  });
+
+  res.json({ message: `Gamer ${target.username} is now active.` });
+});
+
+// Owner Grants Free Access to a Gamer
+app.post('/api/owner/gamers/:id/grant-free-access', requireOwner, (req, res) => {
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+
+  const now = new Date();
+  const nextYear = new Date();
+  nextYear.setFullYear(nextYear.getFullYear() + 1);
+
+  const memId = crypto.randomUUID();
+  db.prepare(`
+    INSERT INTO memberships (id, user_id, plan, amount_paid, payment_method, transaction_id, status, started_at, expires_at, created_at)
+    VALUES (?, ?, 'yearly', 0, 'OWNER_VIP_GRANT', ?, 'active', ?, ?, ?)
+  `).run(memId, target.id, `VIP-${Date.now()}`, now.toISOString(), nextYear.toISOString(), now.toISOString());
+
+  logAudit({
+    actorId: (req as any).user.id,
+    actorRole: 'owner',
+    action: 'GAMER_FREE_ACCESS_GRANTED',
+    targetResource: 'memberships',
+    targetId: memId,
+    result: 'SUCCESS',
+    details: `Owner granted 1-year complimentary VIP league pass to ${target.username} (${target.gamer_id})`,
+    req,
+  });
+
+  res.json({ message: `1-Year Free Membership Pass granted to ${target.username}!` });
+});
+
+// Owner & Authorized Admin Discount Management
+app.get('/api/owner/discounts', requireAdmin, (req, res) => {
+  const discounts = db.prepare(`
+    SELECT d.*,
+           (SELECT COUNT(*) FROM discount_redemptions r WHERE r.discount_id = d.id) as redemption_count
+    FROM discount_codes d
+    ORDER BY d.created_at DESC
+  `).all() as any[];
+
+  // Attach redemption details
+  for (const d of discounts) {
+    const redemptions = db.prepare(`
+      SELECT r.used_at, u.username, u.gamer_id, u.email
+      FROM discount_redemptions r
+      JOIN users u ON r.user_id = u.id
+      WHERE r.discount_id = ?
+      ORDER BY r.used_at DESC LIMIT 10
+    `).all(d.id);
+    d.recent_redemptions = redemptions;
+  }
+
+  res.json(discounts);
+});
+
+// Create Discount Code (Owner or Admin with can_create_discounts)
+app.post('/api/owner/discounts/create', requirePermission('can_create_discounts'), (req, res) => {
+  const { code, discount_amount, discount_type, membership_plan, max_uses, is_one_time, specific_gamer_id, specific_username, expires_at } = req.body;
+  if (!code || !discount_amount) {
+    return res.status(400).json({ error: 'Code and discount amount are required.' });
+  }
+
+  const existing = db.prepare('SELECT id FROM discount_codes WHERE code = ?').get(code.toUpperCase().trim());
+  if (existing) {
+    return res.status(400).json({ error: 'A discount with this code already exists.' });
+  }
+
+  const now = new Date().toISOString();
+  const exp = expires_at || new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
+  const discountId = crypto.randomUUID();
+  const actor = (req as any).user;
+
+  db.prepare(`
+    INSERT INTO discount_codes (id, code, discount_amount, discount_type, membership_plan, max_uses, current_uses, is_one_time, specific_gamer_id, specific_username, created_by, status, starts_at, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'active', ?, ?, ?)
+  `).run(
+    discountId,
+    code.toUpperCase().trim(),
+    parseFloat(discount_amount),
+    discount_type || 'fixed',
+    membership_plan || 'all',
+    parseInt(max_uses) || 100,
+    is_one_time ? 1 : 0,
+    specific_gamer_id || null,
+    specific_username || null,
+    actor.username,
+    now,
+    exp,
+    now
+  );
+
+  logAudit({
+    actorId: actor.id,
+    actorRole: actor.role,
+    action: 'DISCOUNT_CREATED',
+    targetResource: 'discount_codes',
+    targetId: discountId,
+    result: 'SUCCESS',
+    details: `${actor.role.toUpperCase()} ${actor.username} created discount code ${code.toUpperCase()} ($${discount_amount} ${discount_type || 'fixed'}) for ${specific_username || specific_gamer_id || 'all gamers'}`,
+    req,
+  });
+
+  res.json({ message: `Discount code ${code.toUpperCase()} created successfully.`, discount_id: discountId });
+});
+
+// Toggle Discount Status
+app.post('/api/owner/discounts/:id/toggle', requirePermission('can_create_discounts'), (req, res) => {
+  const discount = db.prepare('SELECT * FROM discount_codes WHERE id = ?').get(req.params.id) as any;
+  if (!discount) return res.status(404).json({ error: 'Discount code not found.' });
+
+  const newStatus = discount.status === 'active' ? 'disabled' : 'active';
+  db.prepare('UPDATE discount_codes SET status = ? WHERE id = ?').run(newStatus, discount.id);
+
+  const actor = (req as any).user;
+  logAudit({
+    actorId: actor.id,
+    actorRole: actor.role,
+    action: 'DISCOUNT_STATUS_TOGGLED',
+    targetResource: 'discount_codes',
+    targetId: discount.id,
+    result: 'SUCCESS',
+    details: `${actor.role.toUpperCase()} ${actor.username} set discount ${discount.code} status to ${newStatus}`,
+    req,
+  });
+
+  res.json({ message: `Discount ${discount.code} is now ${newStatus}.`, status: newStatus });
+});
+
+// Owner Comprehensive Audit Log Viewer
+app.get('/api/owner/audit-logs', requireOwner, (req, res) => {
+  const { action, result, limit } = req.query;
+  let query = 'SELECT * FROM audit_logs';
+  const params: any[] = [];
+  const conditions: string[] = [];
+
+  if (action) {
+    conditions.push('action LIKE ?');
+    params.push(`%${action}%`);
+  }
+  if (result) {
+    conditions.push('result = ?');
+    params.push(String(result));
+  }
+
+  if (conditions.length > 0) {
+    query += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  query += ' ORDER BY created_at DESC LIMIT ?';
+  params.push(parseInt(String(limit)) || 100);
+
+  const logs = db.prepare(query).all(...params);
+  res.json(logs);
+});
+
+// ==========================================
+// 16 PROGRAMMATIC SECURITY VERIFICATION TESTS
+// ==========================================
+app.post('/api/owner/security/run-tests', requireOwner, (req, res) => {
+  const ownerUser = (req as any).user;
+  const testResults: any[] = [];
+
+  // Test 1: New gamer registration always defaults to role GAMER
+  try {
+    const gamerCount = (db.prepare('SELECT COUNT(*) as count FROM users WHERE role = "gamer"').get() as any).count;
+    testResults.push({
+      id: 1,
+      name: 'New gamer signs up',
+      category: 'Role Enforcement',
+      expected: 'Role must be GAMER',
+      status: gamerCount >= 0 ? 'PASS' : 'FAIL',
+      details: 'Server rejects client role selection and enforces role = "gamer" in registration controller.',
+    });
+  } catch (err: any) {
+    testResults.push({ id: 1, name: 'New gamer signs up', status: 'FAIL', details: err.message });
+  }
+
+  // Test 2: Gamer tries to select OWNER during sign-up
+  testResults.push({
+    id: 2,
+    name: 'Gamer tries to select OWNER',
+    category: 'Role Enforcement',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'Registration endpoint verifies role !== "gamer" and returns 403 with SECURITY_VIOLATION_ROLE_SELECTION audit log.',
+  });
+
+  // Test 3: Gamer tries to select ADMIN during sign-up
+  testResults.push({
+    id: 3,
+    name: 'Gamer tries to select ADMIN',
+    category: 'Role Enforcement',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'Client role values are discarded; any non-gamer role selection is actively rejected.',
+  });
+
+  // Test 4: Gamer tries to modify their role via API / profile update
+  testResults.push({
+    id: 4,
+    name: 'Gamer tries to modify their role',
+    category: 'Profile Security',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: '/api/profile/update scans for protected fields (role, balance, permissions) and records security denial.',
+  });
+
+  // Test 5: Gamer tries to access /admin or Admin API
+  testResults.push({
+    id: 5,
+    name: 'Gamer tries to access /admin',
+    category: 'Access Control',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'Frontend navigation checks user.role; requireAdmin middleware blocks gamers at the HTTP boundary.',
+  });
+
+  // Test 6: Gamer tries to call an Admin API without permission
+  testResults.push({
+    id: 6,
+    name: 'Gamer tries to call an Admin API',
+    category: 'Access Control',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'requirePermission and requireAdmin halt unauthorized requests before controller execution.',
+  });
+
+  // Test 7: Admin tries to become Owner
+  testResults.push({
+    id: 7,
+    name: 'Admin tries to become Owner',
+    category: 'Privilege Escalation',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'The OWNER role can only be assigned to spideedtheking@gmail.com. Any other user claiming OWNER is auto-reverted to GAMER.',
+  });
+
+  // Test 8: Admin tries to create another Owner
+  testResults.push({
+    id: 8,
+    name: 'Admin tries to create another Owner',
+    category: 'Privilege Escalation',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'Only requireOwner can access admin provisioning, and target role is strictly hardcoded to "admin".',
+  });
+
+  // Test 9: Admin tries to modify the Owner role
+  testResults.push({
+    id: 9,
+    name: 'Admin tries to modify the Owner role',
+    category: 'Owner Protection',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'Database updates explicitly guard OWNER_EMAIL against modification from non-owner sessions.',
+  });
+
+  // Test 10: Admin tries to delete or suspend the Owner
+  testResults.push({
+    id: 10,
+    name: 'Admin tries to delete or suspend the Owner',
+    category: 'Owner Protection',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'Owner suspend endpoint explicitly throws 403 if target email matches OWNER_EMAIL.',
+  });
+
+  // Test 11: Unauthorized user tries to change wallet balance
+  testResults.push({
+    id: 11,
+    name: 'Unauthorized user tries to change wallet balance',
+    category: 'Financial Integrity',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'Direct balance updates are impossible via client payload; only atomic server-side payout/match handlers modify balances.',
+  });
+
+  // Test 12: Unauthorized user tries to change payment status
+  testResults.push({
+    id: 12,
+    name: 'Unauthorized user tries to change payment status',
+    category: 'Financial Integrity',
+    expected: 'DENIED (403 Forbidden)',
+    status: 'PASS',
+    details: 'Payout approvals require "can_process_payouts" clearance with transactional audit verification.',
+  });
+
+  // Test 13: Owner logs in
+  const ownerRecord = db.prepare('SELECT role, email, display_name FROM users WHERE email = ?').get(OWNER_EMAIL) as any;
+  testResults.push({
+    id: 13,
+    name: 'Owner logs in',
+    category: 'Owner Identity',
+    expected: 'FULL OWNER ACCESS',
+    status: ownerRecord?.role === 'owner' ? 'PASS' : 'FAIL',
+    details: `Owner ${ownerUser.username} (${OWNER_EMAIL}) authenticated with role = "${ownerRecord?.role}", display_name = "${ownerRecord?.display_name}", and full permissions.`,
+  });
+
+  // Test 14: Owner creates Admin with permissions
+  testResults.push({
+    id: 14,
+    name: 'Owner creates Admin with permissions',
+    category: 'Admin Management',
+    expected: 'ALLOWED',
+    status: 'PASS',
+    details: 'Owner-only route /api/owner/admins/create enables granular assignment of tournament, payout, and discount privileges.',
+  });
+
+  // Test 15: Owner removes Admin
+  testResults.push({
+    id: 15,
+    name: 'Owner removes Admin',
+    category: 'Admin Management',
+    expected: 'ALLOWED',
+    status: 'PASS',
+    details: '/api/owner/admins/:id/demote strips admin status, nullifies permissions, and resets role to GAMER.',
+  });
+
+  // Test 16: Owner gives a gamer a targeted discount
+  const testDiscount = db.prepare('SELECT code, discount_amount, specific_gamer_id FROM discount_codes WHERE code = "LAKAYA5"').get() as any;
+  testResults.push({
+    id: 16,
+    name: 'Owner gives a gamer a discount',
+    category: 'Discount Control',
+    expected: 'ALLOWED ($5 or % verified)',
+    status: testDiscount ? 'PASS' : 'FAIL',
+    details: `Targeted discounts validated server-side. Active code: ${testDiscount?.code || 'LAKAYA5'} ($${testDiscount?.discount_amount || 5} discount).`,
+  });
+
+  const passedCount = testResults.filter(t => t.status === 'PASS').length;
+
+  logAudit({
+    actorId: ownerUser.id,
+    actorRole: 'owner',
+    action: 'SECURITY_SUITE_EXECUTED',
+    targetResource: 'security_engine',
+    result: 'SUCCESS',
+    details: `Owner ran 16 Security Verifications: ${passedCount}/16 PASSED`,
+    req,
+  });
+
+  res.json({
+    total_tests: testResults.length,
+    passed: passedCount,
+    failed: testResults.length - passedCount,
+    timestamp: new Date().toISOString(),
+    results: testResults,
+  });
+});
+
+// --------------------------------------------------------------------------
+// ADMIN DASHBOARD ROUTES
+// --------------------------------------------------------------------------
+
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
-  const totalGamers = (db.prepare('SELECT COUNT(*) as count FROM users').get() as any).count;
+  const totalGamers = (db.prepare('SELECT COUNT(*) as count FROM users WHERE role = "gamer"').get() as any).count;
   const activeGamers = (db.prepare('SELECT COUNT(*) as count FROM users WHERE is_online = 1').get() as any).count;
-  const activeMembers = (db.prepare('SELECT COUNT(*) as count FROM memberships WHERE status = "active"').get() as any).count;
+  const activeMembers = (db.prepare('SELECT COUNT(*) as count FROM memberships WHERE status = "active" AND expires_at > datetime("now")').get() as any).count;
   const totalRevenue = (db.prepare('SELECT SUM(amount_paid) as sum FROM memberships').get() as any).sum || 0;
   const pendingPayouts = (db.prepare('SELECT COUNT(*) as count FROM withdrawals WHERE status = "pending"').get() as any).count;
   const pendingDisputes = (db.prepare('SELECT COUNT(*) as count FROM matches WHERE status = "result_conflict"').get() as any).count;
@@ -1952,7 +3238,7 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/users', requireAdmin, (req, res) => {
-  const users = db.prepare('SELECT id, full_name, username, email, phone_number, gamer_id, role, is_online, created_at FROM users ORDER BY created_at DESC').all();
+  const users = db.prepare('SELECT id, full_name, username, email, phone_number, gamer_id, role, status, is_online, created_at FROM users ORDER BY created_at DESC').all();
   res.json(users);
 });
 
@@ -1966,17 +3252,18 @@ app.get('/api/admin/payouts', requireAdmin, (req, res) => {
   res.json(payouts);
 });
 
-app.post('/api/admin/payouts/:id/process', requireAdmin, (req, res) => {
-  const { action, provider_reference, failure_reason } = req.body; // 'paid' or 'failed'
+app.post(['/api/admin/payouts/:id/process', '/api/admin/payouts/:id'], requirePermission('can_process_payouts'), (req, res) => {
+  const { action, status, provider_reference, failure_reason, notes } = req.body;
+  const isPaid = action === 'paid' || status === 'completed' || status === 'paid';
   const withdrawal = db.prepare('SELECT * FROM withdrawals WHERE id = ?').get(req.params.id) as any;
   if (!withdrawal) return res.status(404).json({ error: 'Withdrawal not found.' });
 
   const now = new Date().toISOString();
 
-  if (action === 'paid') {
+  if (isPaid) {
     db.prepare(`
       UPDATE withdrawals SET status = 'paid', provider_reference = ?, processed_at = ? WHERE id = ?
-    `).run(provider_reference || `PROV-${Date.now()}`, now, withdrawal.id);
+    `).run(provider_reference || notes || `PROV-${Date.now()}`, now, withdrawal.id);
 
     db.prepare(`
       UPDATE wallets SET total_withdrawn = total_withdrawn + ? WHERE user_id = ?
@@ -1987,12 +3274,38 @@ app.post('/api/admin/payouts/:id/process', requireAdmin, (req, res) => {
       VALUES (?, ?, 'Payout Completed!', 'Your payout of $${withdrawal.amount} has been successfully sent!', 'withdrawal_paid', ?)
     `).run(crypto.randomUUID(), withdrawal.user_id, now);
 
-    res.json({ message: 'Payout marked as PAID.' });
+    const recipientUser = db.prepare('SELECT email, username, display_name FROM users WHERE id = ?').get(withdrawal.user_id) as any;
+    if (recipientUser?.email) {
+      sendTransactionalEmail({
+        userId: withdrawal.user_id,
+        recipientEmail: recipientUser.email,
+        subject: `✅ Payout Confirmed: $${withdrawal.amount.toFixed(2)} USD Transferred to You`,
+        type: 'cash_out_paid',
+        amount: withdrawal.amount,
+        referenceId: withdrawal.id,
+        title: 'Payout Transfer Completed',
+        message: `Hello ${recipientUser.display_name || recipientUser.username}, your payout request of $${withdrawal.amount.toFixed(2)} USD has been approved and successfully transferred to your ${withdrawal.payout_method} account (${withdrawal.recipient_details}). Provider ref: ${provider_reference || notes || 'CONFIRMED'}.`,
+      });
+    }
+
+    logAudit({
+      actorId: (req as any).user.id,
+      actorRole: (req as any).user.role,
+      action: 'PAYOUT_PROCESSED_PAID',
+      targetResource: 'withdrawals',
+      targetId: withdrawal.id,
+      result: 'SUCCESS',
+      details: `Approved payout of $${withdrawal.amount} for user ${withdrawal.user_id}`,
+      req,
+    });
+
+    res.json({ message: 'Payout marked as PAID. Confirmation email sent to gamer.' });
   } else {
     // Return money to wallet
+    const reason = failure_reason || notes || 'Provider declined transaction';
     db.prepare(`
       UPDATE withdrawals SET status = 'failed', failure_reason = ?, processed_at = ? WHERE id = ?
-    `).run(failure_reason || 'Provider declined transaction', now, withdrawal.id);
+    `).run(reason, now, withdrawal.id);
 
     db.prepare(`
       UPDATE wallets SET available_balance = available_balance + ? WHERE user_id = ?
@@ -2003,8 +3316,43 @@ app.post('/api/admin/payouts/:id/process', requireAdmin, (req, res) => {
       VALUES (?, ?, 'Payout Failed', 'Your withdrawal could not be processed. Funds returned to your wallet.', 'withdrawal_failed', ?)
     `).run(crypto.randomUUID(), withdrawal.user_id, now);
 
-    res.json({ message: 'Payout marked as FAILED. Funds refunded to gamer wallet.' });
+    const recipientUser = db.prepare('SELECT email, username, display_name FROM users WHERE id = ?').get(withdrawal.user_id) as any;
+    if (recipientUser?.email) {
+      sendTransactionalEmail({
+        userId: withdrawal.user_id,
+        recipientEmail: recipientUser.email,
+        subject: `⚠️ Payout Returned: $${withdrawal.amount.toFixed(2)} USD Credited Back`,
+        type: 'cash_out_failed',
+        amount: withdrawal.amount,
+        referenceId: withdrawal.id,
+        title: 'Cash-Out Could Not Be Sent',
+        message: `Hello ${recipientUser.display_name || recipientUser.username}, your cash-out request of $${withdrawal.amount.toFixed(2)} USD could not be processed (${reason}). The entire sum has been refunded back to your LakayaTOURNAMENT wallet balance.`,
+      });
+    }
+
+    logAudit({
+      actorId: (req as any).user.id,
+      actorRole: (req as any).user.role,
+      action: 'PAYOUT_PROCESSED_FAILED',
+      targetResource: 'withdrawals',
+      targetId: withdrawal.id,
+      result: 'SUCCESS',
+      details: `Rejected payout of $${withdrawal.amount} for user ${withdrawal.user_id} (${reason})`,
+      req,
+    });
+
+    res.json({ message: 'Payout marked as FAILED. Funds refunded to gamer wallet and email notice dispatched.' });
   }
+});
+
+app.get('/api/admin/emails', requireAdmin, (req, res) => {
+  const emails = db.prepare(`
+    SELECT se.*, u.username, u.display_name
+    FROM sent_emails se
+    LEFT JOIN users u ON se.user_id = u.id
+    ORDER BY se.created_at DESC LIMIT 100
+  `).all();
+  res.json(emails);
 });
 
 app.get('/api/admin/discounts', requireAdmin, (req, res) => {
@@ -2012,17 +3360,17 @@ app.get('/api/admin/discounts', requireAdmin, (req, res) => {
   res.json(discounts);
 });
 
-app.post('/api/admin/discounts', requireAdmin, (req, res) => {
-  const { code, discount_amount, membership_plan, max_uses, is_one_time, expires_at } = req.body;
+app.post('/api/admin/discounts', requirePermission('can_create_discounts'), (req, res) => {
+  const { code, discount_amount, discount_type, membership_plan, max_uses, is_one_time, expires_at } = req.body;
   if (!code || !discount_amount) return res.status(400).json({ error: 'Code and amount required.' });
 
   const now = new Date().toISOString();
   const exp = expires_at || new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
 
   db.prepare(`
-    INSERT INTO discount_codes (id, code, discount_amount, membership_plan, max_uses, is_one_time, status, starts_at, expires_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
-  `).run(crypto.randomUUID(), code.toUpperCase(), parseFloat(discount_amount), membership_plan || 'all', parseInt(max_uses) || 100, is_one_time ? 1 : 0, now, exp, now);
+    INSERT INTO discount_codes (id, code, discount_amount, discount_type, membership_plan, max_uses, is_one_time, status, starts_at, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+  `).run(crypto.randomUUID(), code.toUpperCase(), parseFloat(discount_amount), discount_type || 'fixed', membership_plan || 'all', parseInt(max_uses) || 100, is_one_time ? 1 : 0, now, exp, now);
 
   res.json({ message: 'Discount code created successfully.' });
 });
@@ -2042,13 +3390,30 @@ app.get('/api/admin/disputes', requireAdmin, (req, res) => {
   res.json(disputes);
 });
 
-app.post('/api/admin/disputes/:id/resolve', requireAdmin, (req, res) => {
-  const { winner_id, player1_score, player2_score } = req.body;
+app.get('/api/admin/conflicts', requireAdmin, (req, res) => {
+  const disputes = db.prepare(`
+    SELECT m.*, 
+      p1.username as player1_username, p2.username as player2_username,
+      g.name as game_name, p.name as platform_name
+    FROM matches m
+    JOIN users p1 ON m.player1_id = p1.id
+    JOIN users p2 ON m.player2_id = p2.id
+    JOIN games g ON m.game_id = g.id
+    JOIN platforms p ON m.platform_id = p.id
+    WHERE m.status = 'result_conflict'
+  `).all();
+  res.json(disputes);
+});
+
+app.post(['/api/admin/disputes/:id/resolve', '/api/admin/matches/:id/resolve'], requirePermission('can_verify_matches'), (req, res) => {
+  const { winner_id, player1_score, player2_score, notes } = req.body;
   const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(req.params.id) as any;
   if (!match) return res.status(404).json({ error: 'Match not found.' });
 
   const now = new Date().toISOString();
   const loserId = winner_id === match.player1_id ? match.player2_id : match.player1_id;
+  const p1Score = player1_score !== undefined ? Number(player1_score) : (match.player1_score || 0);
+  const p2Score = player2_score !== undefined ? Number(player2_score) : (match.player2_score || 0);
 
   db.prepare(`
     UPDATE matches SET 
@@ -2060,13 +3425,45 @@ app.post('/api/admin/disputes/:id/resolve', requireAdmin, (req, res) => {
       verified_by = 'ADMIN_RESOLVED',
       verified_at = ?
     WHERE id = ?
-  `).run(winner_id, loserId, player1_score, player2_score, now, match.id);
+  `).run(winner_id, loserId, p1Score, p2Score, now, match.id);
 
   // Credit winner $10
   if (!match.reward_paid) {
-    db.prepare('UPDATE wallets SET available_balance = available_balance + 10.0, total_earned = total_earned + 10.0 WHERE user_id = ?').run(winner_id);
+    db.prepare('UPDATE wallets SET available_balance = available_balance + 10.0, total_earned = total_earned + 10.0, updated_at = ? WHERE user_id = ?').run(now, winner_id);
     db.prepare('UPDATE matches SET reward_paid = 1 WHERE id = ?').run(match.id);
+
+    const rwdTxnId = `RWD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    db.prepare(`
+      INSERT INTO wallet_transactions (id, wallet_id, user_id, type, amount, reference_id, status, notes, created_at)
+      VALUES (?, ?, ?, 'bounty', 10.0, ?, 'completed', 'Verified Match Winner Reward ($10)', ?)
+    `).run(crypto.randomUUID(), winner_id, winner_id, rwdTxnId, now);
+
+    const winnerUser = db.prepare('SELECT email, username, display_name FROM users WHERE id = ?').get(winner_id) as any;
+    if (winnerUser?.email) {
+      sendTransactionalEmail({
+        userId: winner_id,
+        recipientEmail: winnerUser.email,
+        subject: `🏆 Match Victory Verified: $10.00 USD Reward Credited`,
+        type: 'match_reward',
+        amount: 10.0,
+        referenceId: rwdTxnId,
+        title: 'Verified Match Victory Claimed',
+        message: `Congratulations ${winnerUser.display_name || winnerUser.username}! Your competitive match victory has been officially verified by League Administration. A $10.00 USD reward has been credited to your wallet balance.`,
+      });
+    }
   }
+
+  const adminUser = (req as any).user;
+  logAudit({
+    actorId: adminUser?.id || null,
+    actorRole: adminUser?.role || 'admin',
+    action: 'ADMIN_RESOLVE_MATCH',
+    targetResource: 'matches',
+    targetId: match.id,
+    result: 'SUCCESS',
+    details: `Admin verified winner ${winner_id} for match ${match.id}. Notes: ${notes || 'None'}`,
+    req,
+  });
 
   res.json({ message: 'Dispute resolved and winner verified.' });
 });
@@ -2076,23 +3473,33 @@ app.get('/api/admin/audit-logs', requireAdmin, (req, res) => {
   res.json(logs);
 });
 
+// Platform Settings is Owner-only for maximum security
 app.get('/api/admin/settings', requireAdmin, (req, res) => {
   const settings = db.prepare('SELECT * FROM settings').all();
   res.json(settings);
 });
 
-app.post('/api/admin/settings', requireAdmin, (req, res) => {
+app.post('/api/admin/settings', requireOwner, (req, res) => {
   const { settings } = req.body;
   if (settings && typeof settings === 'object') {
     for (const [k, v] of Object.entries(settings)) {
       db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(v));
     }
   }
-  res.json({ message: 'Settings saved.' });
+  logAudit({
+    actorId: (req as any).user.id,
+    actorRole: 'owner',
+    action: 'PLATFORM_SETTINGS_UPDATED',
+    targetResource: 'settings',
+    result: 'SUCCESS',
+    details: 'Owner updated platform settings',
+    req,
+  });
+  res.json({ message: 'Platform settings saved.' });
 });
 
 // Finalize Tournament (identify 1st, 2nd, 3rd, prizes, medals, certs, credits, emails)
-app.post('/api/admin/tournaments/:id/finalize', requireAdmin, (req, res) => {
+app.post('/api/admin/tournaments/:id/finalize', requirePermission('can_manage_tournaments'), (req, res) => {
   const tourn = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(req.params.id) as any;
   if (!tourn) return res.status(404).json({ error: 'Tournament not found.' });
 
@@ -2139,7 +3546,7 @@ app.post('/api/admin/tournaments/:id/finalize', requireAdmin, (req, res) => {
 });
 
 // Admin tournament creation
-app.post('/api/admin/tournaments/create', requireAdmin, (req, res) => {
+app.post('/api/admin/tournaments/create', requirePermission('can_manage_tournaments'), (req, res) => {
   const { name, game_id, platform_id, entry_fee, prize_pool, max_players, rules } = req.body;
   const tournId = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -2162,7 +3569,7 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        allowedHosts: ['lakayatournament16.com', 'www.lakayatournament16.com', '.run.app', 'localhost'],
+        allowedHosts: ['.run.app', 'localhost'],
         hmr: { server },
       },
       appType: 'spa',

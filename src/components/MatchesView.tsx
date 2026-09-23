@@ -201,7 +201,7 @@ export const MatchesView: React.FC = () => {
                       <div className="text-[11px] text-slate-400 mt-1">Waiting for opponent to confirm.</div>
                     </div>
                   ) : (
-                    <div className="flex items-center space-x-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => handleOpenSubmitModal(m)}
                         className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow transition"

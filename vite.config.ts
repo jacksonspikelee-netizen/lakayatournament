@@ -12,7 +12,7 @@ export default defineConfig(() => {
       },
     },
     server: {
-      allowedHosts: ['lakayatournament16.com', 'www.lakayatournament16.com', '.run.app', 'localhost'],
+      allowedHosts: ['.run.app', 'localhost'],
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },

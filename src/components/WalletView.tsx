@@ -12,7 +12,11 @@ import {
   X,
   Building2,
   Phone,
-  Send
+  Send,
+  Mail,
+  Receipt,
+  Eye,
+  Check
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -25,7 +29,17 @@ export const WalletView: React.FC = () => {
 
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [payouts, setPayouts] = useState<PayoutRequest[]>([]);
+  const [emailReceipts, setEmailReceipts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
+
+  // Deposit Modal State
+  const [depositModalOpen, setDepositModalOpen] = useState(false);
+  const [depositAmount, setDepositAmount] = useState('15.00');
+  const [depositMethod, setDepositMethod] = useState<'moncash' | 'natcash' | 'sogebank' | 'unibank'>('moncash');
+  const [depositPhone, setDepositPhone] = useState('+509 ');
+  const [submittingDeposit, setSubmittingDeposit] = useState(false);
+  const [depositMessage, setDepositMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Payout Request Modal
   const [payoutModalOpen, setPayoutModalOpen] = useState(false);
@@ -40,6 +54,7 @@ export const WalletView: React.FC = () => {
     if (!user) {
       setTransactions([]);
       setPayouts([]);
+      setEmailReceipts([]);
       setLoading(false);
       return;
     }
@@ -47,14 +62,17 @@ export const WalletView: React.FC = () => {
     Promise.all([
       apiRequest<WalletTransaction[]>('/wallet/transactions').catch(() => []),
       apiRequest<PayoutRequest[]>('/payouts/my-requests').catch(() => []),
+      apiRequest<any[]>('/user/email-receipts').catch(() => []),
     ])
-      .then(([txs, pouts]) => {
+      .then(([txs, pouts, emails]) => {
         setTransactions(Array.isArray(txs) ? txs : []);
         setPayouts(Array.isArray(pouts) ? pouts : []);
+        setEmailReceipts(Array.isArray(emails) ? emails : []);
       })
       .catch(() => {
         setTransactions([]);
         setPayouts([]);
+        setEmailReceipts([]);
       })
       .finally(() => setLoading(false));
   };
@@ -62,6 +80,45 @@ export const WalletView: React.FC = () => {
   useEffect(() => {
     fetchWalletData();
   }, [user]);
+
+  const handleDeposit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmittingDeposit(true);
+    setDepositMessage(null);
+
+    const amountNum = parseFloat(depositAmount);
+    if (!amountNum || amountNum <= 0) {
+      setDepositMessage({ type: 'error', text: 'Please enter a valid deposit amount.' });
+      setSubmittingDeposit(false);
+      return;
+    }
+
+    try {
+      const res = await apiRequest<any>('/wallet/deposit', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: amountNum,
+          payment_method: depositMethod,
+          phone_number: depositPhone,
+        }),
+      });
+
+      setDepositMessage({
+        type: 'success',
+        text: res.message || `Payment verified! Receipt emailed to ${user?.email}`,
+      });
+      await refreshUser();
+      fetchWalletData();
+      setTimeout(() => {
+        setDepositModalOpen(false);
+        setDepositMessage(null);
+      }, 2500);
+    } catch (err: any) {
+      setDepositMessage({ type: 'error', text: err.message || 'Deposit payment failed.' });
+    } finally {
+      setSubmittingDeposit(false);
+    }
+  };
 
   const handleRequestPayout = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,7 +134,7 @@ export const WalletView: React.FC = () => {
 
     try {
       const detailsCombined = `Account Name: ${accountName.trim()} | Destination: ${destinationDetails.trim()}`;
-      await apiRequest('/payouts/request', {
+      const res = await apiRequest<any>('/payouts/request', {
         method: 'POST',
         body: JSON.stringify({
           amount: amountNum,
@@ -88,14 +145,14 @@ export const WalletView: React.FC = () => {
 
       setPayoutMessage({
         type: 'success',
-        text: 'Payout request dispatched securely! Admin review in progress.',
+        text: res.message || `Cash-out requested! Funds deducted and confirmation email sent to ${user?.email}.`,
       });
       await refreshUser();
       fetchWalletData();
       setTimeout(() => {
         setPayoutModalOpen(false);
         setPayoutMessage(null);
-      }, 2000);
+      }, 2500);
     } catch (err: any) {
       setPayoutMessage({ type: 'error', text: err.message || 'Payout request failed.' });
     } finally {
@@ -115,20 +172,42 @@ export const WalletView: React.FC = () => {
             <span>LakayaTOURNAMENT Player Wallet</span>
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            Manage your verified tournament winnings, match bounties, and secure payouts via MonCash, Natcash & Haitian Banks.
+            Manage tournament winnings, pay entry fees, deposit funds, and receive instant transactional email receipts for all cash-outs.
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setPayoutModalOpen(true);
-            setPayoutAmount(balance > 0 ? balance.toFixed(2) : '10.00');
-          }}
-          className="px-6 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white font-display font-bold text-xs tracking-wider rounded-xl shadow-xl shadow-emerald-950/40 transition transform active:scale-98 flex items-center space-x-2"
-        >
-          <ArrowUpRight className="w-4 h-4" />
-          <span>Request Instant Payout</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => {
+              if (!user) {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+                return;
+              }
+              setDepositModalOpen(true);
+            }}
+            className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-display font-bold text-xs tracking-wider rounded-xl shadow-lg transition flex items-center space-x-2"
+          >
+            <ArrowDownLeft className="w-4 h-4" />
+            <span>Deposit / Peye Lajan</span>
+          </button>
+
+          <button
+            onClick={() => {
+              if (!user) {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+                return;
+              }
+              setPayoutModalOpen(true);
+              setPayoutAmount(balance > 0 ? balance.toFixed(2) : '10.00');
+            }}
+            className="px-6 py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white font-display font-bold text-xs tracking-wider rounded-xl shadow-xl shadow-emerald-950/40 transition transform active:scale-98 flex items-center space-x-2"
+          >
+            <ArrowUpRight className="w-4 h-4" />
+            <span>Request Cash Out</span>
+          </button>
+        </div>
       </div>
 
       {/* Guest Notice Banner */}
@@ -141,7 +220,7 @@ export const WalletView: React.FC = () => {
             <div>
               <div className="font-display font-bold text-white text-base">You are viewing Wallet in Guest Mode</div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Log in to view your actual tournament prize balance, track MonCash/Natcash payouts, and submit withdrawals.
+                Log in to view your prize balance, receive email receipts when you pay or cash out, and manage MonCash/Natcash withdrawals.
               </p>
             </div>
           </div>
@@ -184,17 +263,21 @@ export const WalletView: React.FC = () => {
           </p>
         </div>
 
-        {/* Total Earned */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Total Prize Winnings
+        {/* Email Notification & Security Guarantee */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
+          <div>
+            <div className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center space-x-1.5">
+              <Mail className="w-4 h-4 text-sky-400" />
+              <span>Email Transaction Alerts</span>
+            </div>
+            <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+              Whenever you pay or cash out funds, the system immediately dispatches an official email receipt directly to your registered inbox ({user?.email || 'your email'}).
+            </p>
           </div>
-          <div className="font-display font-black text-3xl text-amber-400 mt-3">
-            ${((balance * 1.5) + 20).toFixed(2)} <span className="text-xs font-normal text-slate-400">USD</span>
+          <div className="text-[10px] text-emerald-400 font-bold mt-3 flex items-center space-x-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Live Transaction Receipts Enforced</span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-2">
-            Cumulated earnings from verified match victories and official tournament rewards.
-          </p>
         </div>
 
         {/* Payout Security Notice */}
@@ -202,15 +285,89 @@ export const WalletView: React.FC = () => {
           <div>
             <div className="text-xs font-bold text-blue-300 uppercase tracking-wider flex items-center space-x-1.5">
               <ShieldCheck className="w-4 h-4 text-blue-400" />
-              <span>Security Guarantee</span>
+              <span>Security & Payout Pipeline</span>
             </div>
             <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-              Financial transactions are processed through encrypted backend pipelines. Payouts are verified against tournament logs.
+              Financial operations are logged and audited with unique transaction IDs. Payouts are protected with multi-step commissioner review.
             </p>
           </div>
-          <div className="text-[10px] text-slate-500 mt-3">
+          <div className="text-[10px] text-slate-400 mt-3">
             Supports Digicel MonCash, Natcom Natcash, Unibank & Sogebank
           </div>
+        </div>
+      </div>
+
+      {/* Dispatched Email Receipts Section */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-display font-bold text-lg text-white flex items-center space-x-2">
+              <Receipt className="w-5 h-5 text-emerald-400" />
+              <span>Dispatched Transaction Email Receipts</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Every time you pay or cash out, an official email notice is generated and stored here with full cryptographic audit details.
+            </p>
+          </div>
+          <span className="text-xs text-slate-500 font-mono">
+            {emailReceipts.length} {emailReceipts.length === 1 ? 'Receipt' : 'Receipts'} Sent
+          </span>
+        </div>
+
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 divide-y divide-slate-800/60">
+          {!user ? (
+            <div className="p-6 text-center text-xs text-slate-400">
+              Please sign in to view your transaction email history.
+            </div>
+          ) : emailReceipts.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 space-y-2">
+              <Mail className="w-8 h-8 text-slate-600 mx-auto" />
+              <div className="text-sm font-semibold text-white">No Email Receipts Yet</div>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                When you make a deposit, pay for a membership, join a paid tournament, or submit a cash out, your official email receipt will appear here.
+              </p>
+            </div>
+          ) : (
+            emailReceipts.map((em) => (
+              <div key={em.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs first:pt-0 last:pb-0">
+                <div className="flex items-start space-x-3">
+                  <div className="w-9 h-9 rounded-xl bg-sky-950/80 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0 mt-0.5">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-white flex items-center space-x-2">
+                      <span>{em.subject}</span>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                        {em.status}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      Sent to: <span className="text-sky-300 font-medium">{em.recipient_email}</span>
+                      {em.reference_id && <span className="ml-2 font-mono text-slate-500">Ref: {em.reference_id}</span>}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      {new Date(em.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-3 self-end sm:self-center">
+                  {em.amount !== null && em.amount !== undefined && (
+                    <div className={`font-display font-bold text-sm ${em.type.includes('requested') || em.type.includes('fee') ? 'text-amber-400' : 'text-emerald-400'}`}>
+                      {em.type.includes('requested') || em.type.includes('fee') ? `-$${Number(em.amount).toFixed(2)}` : `+$${Number(em.amount).toFixed(2)}`}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setSelectedReceipt(em)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center space-x-1.5 transition border border-slate-700"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-sky-400" />
+                    <span>View Email</span>
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -288,7 +445,7 @@ export const WalletView: React.FC = () => {
                   <div className="text-right">
                     <span
                       className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                        p.status === 'completed'
+                        p.status === 'completed' || p.status === 'paid'
                           ? 'bg-emerald-950 border border-emerald-500/40 text-emerald-300'
                           : p.status === 'processing'
                           ? 'bg-blue-950 border border-blue-500/40 text-blue-300'
@@ -305,45 +462,200 @@ export const WalletView: React.FC = () => {
         </div>
       </div>
 
-      {/* Payout Request Modal */}
-      {payoutModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
-          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-8">
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <ArrowUpRight className="w-6 h-6 text-emerald-400" />
-                <h3 className="font-display font-bold text-lg text-white">
-                  Request Payout / Withdrawal
-                </h3>
-              </div>
-              <button
-                onClick={() => setPayoutModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white"
+      {/* Deposit Funds Modal */}
+      {depositModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl relative">
+            <button
+              onClick={() => setDepositModalOpen(false)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="font-display font-black text-xl text-white flex items-center space-x-2">
+              <ArrowDownLeft className="w-5 h-5 text-emerald-400" />
+              <span>Deposit Funds / Peye Lajan</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Add funds to your player wallet for tournament entries, match bounties, and membership. An instant email receipt will be sent to your email.
+            </p>
+
+            {depositMessage && (
+              <div
+                className={`mt-4 p-3.5 rounded-xl text-xs flex items-center space-x-2 ${
+                  depositMessage.type === 'success'
+                    ? 'bg-emerald-950/80 border border-emerald-500 text-emerald-300'
+                    : 'bg-rose-950/80 border border-rose-500 text-rose-300'
+                }`}
               >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
+                {depositMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{depositMessage.text}</span>
+              </div>
+            )}
 
-            <form onSubmit={handleRequestPayout} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-              {payoutMessage && (
-                <div
-                  className={`p-3 rounded-xl text-xs ${
-                    payoutMessage.type === 'success'
-                      ? 'bg-emerald-950 border border-emerald-500 text-emerald-300'
-                      : 'bg-rose-950 border border-rose-500 text-rose-300'
-                  }`}
-                >
-                  {payoutMessage.text}
-                </div>
-              )}
-
+            <form onSubmit={handleDeposit} className="mt-5 space-y-4">
               {/* Amount */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Payout Amount ($ USD)
+                  Deposit Amount (USD) *
                 </label>
                 <div className="relative">
-                  <DollarSign className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                  <span className="absolute left-3.5 top-2.5 text-slate-500 font-bold">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1.00"
+                    required
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Deposit Method */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Select Payment Method
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDepositMethod('moncash')}
+                    className={`p-3 rounded-xl border text-xs font-bold text-left transition ${
+                      depositMethod === 'moncash'
+                        ? 'bg-rose-950/40 border-rose-500 text-rose-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    <div>🇭🇹 Digicel MonCash</div>
+                    <span className="text-[10px] font-normal text-slate-500">Fast Mobile Transfer</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDepositMethod('natcash')}
+                    className={`p-3 rounded-xl border text-xs font-bold text-left transition ${
+                      depositMethod === 'natcash'
+                        ? 'bg-blue-950/40 border-blue-500 text-blue-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    <div>🇭🇹 Natcom Natcash</div>
+                    <span className="text-[10px] font-normal text-slate-500">Mobile Money Haiti</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDepositMethod('sogebank')}
+                    className={`p-3 rounded-xl border text-xs font-bold text-left transition ${
+                      depositMethod === 'sogebank'
+                        ? 'bg-amber-950/40 border-amber-500 text-amber-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    <div>🇭🇹 Sogebank / SPIH</div>
+                    <span className="text-[10px] font-normal text-slate-500">Haitian Bank Deposit</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDepositMethod('unibank')}
+                    className={`p-3 rounded-xl border text-xs font-bold text-left transition ${
+                      depositMethod === 'unibank'
+                        ? 'bg-indigo-950/40 border-indigo-500 text-indigo-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    <div>🇭🇹 Unibank / SPIH</div>
+                    <span className="text-[10px] font-normal text-slate-500">Haitian Bank Deposit</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Phone or Account */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Sender Phone / Account Number *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={depositPhone}
+                  onChange={(e) => setDepositPhone(e.target.value)}
+                  placeholder="+509 347-XXXX"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-[11px] text-slate-400 flex items-start space-x-2">
+                <Mail className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                <span>
+                  An official transaction receipt confirming your deposit will be sent immediately to <strong>{user?.email}</strong>.
+                </span>
+              </div>
+
+              <button
+                type="submit"
+                disabled={submittingDeposit}
+                className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-display font-bold text-xs rounded-xl shadow-lg transition disabled:opacity-50"
+              >
+                {submittingDeposit ? 'Processing Deposit...' : `Pay & Confirm Deposit ($${depositAmount})`}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Payout Modal */}
+      {payoutModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setPayoutModalOpen(false)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="font-display font-black text-xl text-white flex items-center space-x-2">
+              <ArrowUpRight className="w-5 h-5 text-emerald-400" />
+              <span>Cash Out / Request Withdrawal</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Withdraw your verified match rewards and tournament prize money.
+            </p>
+
+            {payoutMessage && (
+              <div
+                className={`mt-4 p-3.5 rounded-xl text-xs flex items-center space-x-2 ${
+                  payoutMessage.type === 'success'
+                    ? 'bg-emerald-950/80 border border-emerald-500 text-emerald-300'
+                    : 'bg-rose-950/80 border border-rose-500 text-rose-300'
+                }`}
+              >
+                {payoutMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{payoutMessage.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleRequestPayout} className="mt-5 space-y-4">
+              {/* Amount */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Withdrawal Amount (USD) *
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-2.5 text-slate-500 font-bold">$</span>
                   <input
                     type="number"
                     step="0.01"
@@ -450,8 +762,12 @@ export const WalletView: React.FC = () => {
                 />
               </div>
 
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-[11px] text-slate-400">
-                🔒 Payout requests are verified by the LakayaTOURNAMENT financial team. Processing typically completes within 1-2 hours.
+              {/* Strong Email Notice */}
+              <div className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-xl text-[11px] text-amber-200 flex items-start space-x-2">
+                <Mail className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Immediate Email Confirmation:</strong> An official withdrawal receipt will be sent to <strong>{user?.email}</strong> informing you that the money was taken out of your wallet.
+                </span>
               </div>
 
               <button
@@ -459,9 +775,49 @@ export const WalletView: React.FC = () => {
                 disabled={submittingPayout || balance <= 0}
                 className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-display font-bold text-xs rounded-xl shadow-lg transition disabled:opacity-50"
               >
-                {submittingPayout ? 'Submitting Request...' : `Confirm Withdrawal ($${payoutAmount})`}
+                {submittingPayout ? 'Submitting Request...' : `Confirm Cash Out ($${payoutAmount})`}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* View Email Receipt Modal */}
+      {selectedReceipt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-xl shadow-2xl relative max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center space-x-2.5">
+                <Mail className="w-5 h-5 text-sky-400" />
+                <div>
+                  <h3 className="font-display font-bold text-sm text-white">{selectedReceipt.subject}</h3>
+                  <div className="text-[10px] text-slate-400">Recipient: {selectedReceipt.recipient_email}</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedReceipt(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 overflow-y-auto flex-1 space-y-4">
+              <div 
+                className="rounded-2xl overflow-hidden border border-slate-800"
+                dangerouslySetInnerHTML={{ __html: selectedReceipt.body_html }}
+              />
+            </div>
+
+            <div className="border-t border-slate-800 pt-3 flex items-center justify-between text-xs text-slate-400">
+              <span>Status: <strong className="text-emerald-400 uppercase">{selectedReceipt.status}</strong></span>
+              <button
+                onClick={() => setSelectedReceipt(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold"
+              >
+                Close Receipt
+              </button>
+            </div>
           </div>
         </div>
       )}

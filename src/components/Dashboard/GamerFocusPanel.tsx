@@ -31,7 +31,7 @@ export const GamerFocusPanel: React.FC<GamerFocusPanelProps> = ({
   onEditTag,
   setCurrentTab,
 }) => {
-  const [activeStatTab, setActiveStatTab] = useState<'fc27' | 'mk' | 'gtav' | 'tekken8'>('fc27');
+  const [activeStatTab, setActiveStatTab] = useState<'fc27' | 'mk' | 'nba2k' | 'cod' | 'gtav' | 'tekken8'>('fc27');
   const [copiedTag, setCopiedTag] = useState<string | null>(null);
 
   // Dynamic tags mapping
@@ -206,17 +206,19 @@ export const GamerFocusPanel: React.FC<GamerFocusPanelProps> = ({
         </div>
 
         {/* Game Stats Tabs */}
-        <div className="flex space-x-1.5 border-b border-slate-800 pb-2">
+        <div className="flex flex-wrap gap-1.5 border-b border-slate-800 pb-2">
           {[
             { id: 'fc27', label: 'FC 27' },
             { id: 'mk', label: 'MK' },
+            { id: 'nba2k', label: 'NBA 2K' },
+            { id: 'cod', label: 'COD' },
             { id: 'gtav', label: 'GTA V' },
             { id: 'tekken8', label: 'Tekken 8' },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveStatTab(tab.id as any)}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
                 activeStatTab === tab.id
                   ? 'bg-blue-600 text-white shadow-md'
                   : 'bg-slate-900 text-slate-400 hover:text-white'
@@ -271,6 +273,44 @@ export const GamerFocusPanel: React.FC<GamerFocusPanelProps> = ({
               </>
             )}
 
+            {activeStatTab === 'nba2k' && (
+              <>
+                <div className="p-2.5 flex justify-between items-center">
+                  <span className="text-slate-300 font-semibold flex items-center space-x-2">
+                    <Trophy className="w-3.5 h-3.5 text-orange-400" />
+                    <span>NBA 2K ESPORTS</span>
+                  </span>
+                  <div className="flex items-center space-x-4">
+                    <span className="text-emerald-400 font-bold">Wins: 42</span>
+                    <span className="text-rose-400 font-bold">Losses: 11</span>
+                  </div>
+                </div>
+                <div className="p-2.5 flex justify-between items-center text-[11px] text-slate-400">
+                  <span>Win Rate</span>
+                  <span className="text-white font-mono font-bold">79.2%</span>
+                </div>
+              </>
+            )}
+
+            {activeStatTab === 'cod' && (
+              <>
+                <div className="p-2.5 flex justify-between items-center">
+                  <span className="text-slate-300 font-semibold flex items-center space-x-2">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>COD: WARZONE</span>
+                  </span>
+                  <div className="flex items-center space-x-4">
+                    <span className="text-emerald-400 font-bold">Wins: 38</span>
+                    <span className="text-rose-400 font-bold">Losses: 14</span>
+                  </div>
+                </div>
+                <div className="p-2.5 flex justify-between items-center text-[11px] text-slate-400">
+                  <span>Win Rate</span>
+                  <span className="text-white font-mono font-bold">73.1%</span>
+                </div>
+              </>
+            )}
+
             {activeStatTab === 'gtav' && (
               <>
                 <div className="p-2.5 flex justify-between items-center">
@@ -319,10 +359,12 @@ export const GamerFocusPanel: React.FC<GamerFocusPanelProps> = ({
           <div className="space-y-1.5 text-xs">
             {[
               { game: 'EA FC 27', platform: 'PlayStation', tag: 'GamerXY', color: 'bg-blue-950 text-blue-300 border-blue-600/40' },
+              { game: 'NBA 2K', platform: 'PlayStation', tag: 'DunkKing_HT', color: 'bg-orange-950 text-orange-300 border-orange-600/40' },
               { game: 'Mortal Kombat', platform: 'Xbox', tag: 'AyitiScorpion_X', color: 'bg-emerald-950 text-emerald-300 border-emerald-600/40' },
+              { game: 'COD: Warzone', platform: 'PlayStation', tag: 'Ghost_Delmas', color: 'bg-emerald-950 text-emerald-300 border-emerald-600/40' },
               { game: 'FC 27 (PC)', platform: 'PC Steam', tag: 'PC_Striker509', color: 'bg-indigo-950 text-indigo-300 border-indigo-600/40' },
-              { game: 'Fortnite', platform: 'PlayStation', tag: 'BuildGod_509', color: 'bg-purple-950 text-purple-300 border-purple-600/40' },
               { game: 'Tekken 8', platform: 'PlayStation', tag: 'Jin_PortAuPrince', color: 'bg-red-950 text-red-300 border-red-600/40' },
+              { game: 'Fortnite', platform: 'PlayStation', tag: 'BuildGod_509', color: 'bg-purple-950 text-purple-300 border-purple-600/40' },
               { game: 'GTAV Online', platform: 'PlayStation', tag: 'Chief_SpikeLee', color: 'bg-teal-950 text-teal-300 border-teal-600/40' },
             ].map((gt, idx) => (
               <div

@@ -57,14 +57,21 @@ export const ProfileView: React.FC = () => {
       apiRequest<Platform[]>('/platforms'),
     ])
       .then(([gTags, mDals, cTifs, cReds, gList, pList]) => {
-        setGamerTags(gTags);
-        setMedals(mDals);
-        setCertificates(cTifs);
-        setCredits(cReds);
-        setGames(gList);
-        setPlatforms(pList);
+        setGamerTags(Array.isArray(gTags) ? gTags : []);
+        setMedals(Array.isArray(mDals) ? mDals : []);
+        setCertificates(Array.isArray(cTifs) ? cTifs : []);
+        setCredits(Array.isArray(cReds) ? cReds : []);
+        setGames(Array.isArray(gList) ? gList : []);
+        setPlatforms(Array.isArray(pList) ? pList : []);
       })
-      .catch(console.error);
+      .catch(() => {
+        setGamerTags([]);
+        setMedals([]);
+        setCertificates([]);
+        setCredits([]);
+        setGames([]);
+        setPlatforms([]);
+      });
   };
 
   useEffect(() => {

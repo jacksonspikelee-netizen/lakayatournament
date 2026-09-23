@@ -57,6 +57,25 @@ export const QuickChallengeModal: React.FC<QuickChallengeModalProps> = ({
           </div>
         </div>
 
+        {/* Game Cover Preview */}
+        <div className="relative h-28 w-full rounded-2xl overflow-hidden border border-slate-700/80 shadow-lg">
+          <img
+            src={game.coverImage}
+            alt={game.name}
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
+          <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">
+            <span className="font-display font-black text-sm text-white drop-shadow tracking-wide">
+              {game.name}
+            </span>
+            <span className="text-[10px] font-tech text-amber-300 font-bold bg-black/70 px-2.5 py-0.5 rounded-lg border border-amber-500/30 backdrop-blur">
+              {game.genre}
+            </span>
+          </div>
+        </div>
+
         {submitted ? (
           <div className="py-8 text-center space-y-3">
             <div className="w-12 h-12 rounded-full bg-emerald-950 border-2 border-emerald-500 text-emerald-400 flex items-center justify-center mx-auto text-xl font-bold">

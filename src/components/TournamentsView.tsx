@@ -25,6 +25,7 @@ export const TournamentsView: React.FC = () => {
   const { t } = useLanguage();
 
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [selectedGameFilter, setSelectedGameFilter] = useState<string>('all');
   const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
   const [tournamentDetail, setTournamentDetail] = useState<{
     tournament: Tournament;
@@ -113,9 +114,53 @@ export const TournamentsView: React.FC = () => {
         </div>
       </div>
 
+      {/* Game Filter Pills */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-tech font-bold text-slate-400 uppercase tracking-wider mr-1">
+          FILTER GAME:
+        </span>
+        {[
+          { id: 'all', label: 'All Titles' },
+          { id: 'game-nba2k', label: 'NBA 2K', icon: '🏀' },
+          { id: 'game-fc27', label: 'EA FC 27', icon: '⚽' },
+          { id: 'game-mk', label: 'Mortal Kombat', icon: '🥊' },
+          { id: 'game-cod', label: 'COD: Warzone', icon: '🎯' },
+          { id: 'game-tekken8', label: 'Tekken 8', icon: '⚡' },
+        ].map((f) => {
+          const count = f.id === 'all' 
+            ? tournaments.length 
+            : tournaments.filter(t => t.game_id === f.id || (t.game_name && t.game_name.toLowerCase().includes(f.label.toLowerCase()))).length;
+
+          return (
+            <button
+              key={f.id}
+              onClick={() => setSelectedGameFilter(f.id)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 border ${
+                selectedGameFilter === f.id
+                  ? 'bg-blue-600 border-blue-400 text-white shadow-lg'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+              }`}
+            >
+              {f.icon && <span>{f.icon}</span>}
+              <span>{f.label}</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                selectedGameFilter === f.id ? 'bg-black/30 text-white' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Tournaments Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {tournaments.map((trn) => {
+        {tournaments
+          .filter(trn => {
+            if (selectedGameFilter === 'all') return true;
+            return trn.game_id === selectedGameFilter || (trn.game_name && trn.game_name.toLowerCase().includes(selectedGameFilter.replace('game-', '').toLowerCase()));
+          })
+          .map((trn) => {
           const isFull = trn.current_players >= trn.max_players;
           return (
             <div
